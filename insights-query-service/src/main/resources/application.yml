@@ -1,0 +1,96 @@
+spring:
+  application:
+    name: insights-query-service
+  profiles:
+    default: local
+  kafka:
+    consumer:
+      group-id: "${platform.kafka.consumer-group.insights-serving}"
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+          min-idle: 1
+
+server:
+  port: 8083
+
+platform:
+  kafka:
+    env: ${KAFKA_ENV:local}
+    topic:
+      # internal.event → enriched + attributed events from stream-processing-engine
+      # Key: tenantId:campaignId
+      enriched: "${platform.kafka.env}.internal.event.ads.attribution.ad-interaction-enriched-by-campaign"
+    consumer-group:
+      stream-engine: "${platform.kafka.env}.ads.stream-processing-engine"
+      insights-serving: "${platform.kafka.env}.ads.insights-query-service"
+  pinot:
+    broker: ${PINOT_BROKER:localhost:8099}
+    scheme: ${PINOT_SCHEME:http}          # http (default) or https
+    table: shopping_events
+    connect-timeout-ms: 3000
+    read-timeout-ms: 10000
+    enabled: false
+    # ---- Broker authentication ----
+    # auth-scheme: NONE | BASIC | TOKEN  (default NONE — no Authorization header)
+    # BASIC  →  username + password injected via PINOT_USERNAME / PINOT_PASSWORD K8s Secrets
+    # TOKEN  →  auth-token injected via PINOT_AUTH_TOKEN K8s Secret
+    auth-scheme: ${PINOT_AUTH_SCHEME:NONE}
+    username: ${PINOT_USERNAME:}
+    password: ${PINOT_PASSWORD:}
+    auth-token: ${PINOT_AUTH_TOKEN:}
+
+  # ---- Trino / Iceberg cold-tier (query window > 30 days, architecture §4.3) ----
+  trino:
+    enabled: false                        # set true in staging/prod; false keeps StarTree fallback
+    # Full JDBC URL — must include catalog and schema for HikariCP to work without USE statements.
+    jdbc-url: ${TRINO_JDBC_URL:jdbc:trino://trino:8080/iceberg/ads}
+    user: ${TRINO_USER:insights-query-service}   # Trino X-Trino-User header; from K8s Secret
+    password: ${TRINO_PASSWORD:}                 # LDAP / file auth; leave blank if not needed
+    catalog: iceberg
+    schema: ads
+    table: shopping_events
+    query-timeout-seconds: 60            # per-statement timeout; guards against runaway scans
+    # HikariCP pool — small by design (cold queries are rare and internally parallel in Trino)
+    max-pool-size: 10
+    min-idle: 2
+    connection-timeout-ms: 30000
+    idle-timeout-ms: 600000
+    keepalive-time-ms: 300000
+    # TLS — enable for Trino clusters with HTTPS termination (staging/prod)
+    ssl-enabled: ${TRINO_SSL_ENABLED:false}
+    ssl-truststore-path: ${TRINO_SSL_TRUSTSTORE_PATH:}
+    ssl-truststore-password: ${TRINO_SSL_TRUSTSTORE_PASSWORD:}
+
+  # ---- Periodic reconciliation (architecture §9.1) ----
+  reconciliation:
+    enabled: true
+    # Percentage drift allowed before flagging a discrepancy (e.g. 1.0 = 1 %)
+    discrepancy-threshold-pct: 1.0
+    # Upper bound on campaign keys processed per run (guards against huge result sets)
+    max-campaigns-per-run: 5000
+    # Cron: hourly hot-tier job (Redis vs Pinot) — 5 minutes past every hour
+    hourly-cron: "0 5 * * * *"
+    # Cron: daily warm-tier job (Pinot vs Iceberg) — 01:15 UTC every day
+    daily-cron: "0 15 1 * * *"
+    # Auto-correct Redis deficits detected by the hourly job
+    auto-correct-redis: true
+
+management:
+  server:
+    port: 9090
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true

@@ -1,0 +1,14 @@
+spring:
+  kafka:
+    bootstrap-servers: localhost:9092
+platform:
+  # Confluent Schema Registry — local Docker Compose container.
+  schema-registry:
+    url: http://localhost:8081
+  flink:
+    schema-registry-url: http://localhost:8081
+logging:
+  level:
+    root: INFO
+    com.java: DEBUG
+

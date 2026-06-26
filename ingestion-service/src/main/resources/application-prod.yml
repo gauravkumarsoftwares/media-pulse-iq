@@ -1,0 +1,43 @@
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka-prod-msk:9094}
+    producer:
+      retries: 10
+    properties:
+      security.protocol: ${KAFKA_SECURITY_PROTOCOL:SASL_SSL}
+      sasl.mechanism: ${KAFKA_SASL_MECHANISM:SCRAM-SHA-512}
+
+platform:
+  kafka:
+    env: prod    # → topics become prod.shared.event.ads.clickstream.… etc.
+    partitions: 128
+  security:
+    paseto:
+      enabled: true
+      mode: local
+      local-key: ${PASETO_LOCAL_KEY:}
+      issuer: ${PASETO_ISSUER:edge}
+      audience: ${PASETO_AUDIENCE:media-pulse-iq}
+      token-header: ${PASETO_TOKEN_HEADER:X-Internal-Token}
+      clock-skew-seconds: 30
+
+logging:
+  level:
+    root: WARN
+    com.java: INFO
+
+# Actuator hardening (OWASP A05): expose management on a separate port that is
+# only reachable in-cluster (restrict via NetworkPolicy), and never leak health
+# details publicly.
+management:
+  server:
+    port: 9090
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true

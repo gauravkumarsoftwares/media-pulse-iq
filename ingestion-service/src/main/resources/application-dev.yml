@@ -1,0 +1,22 @@
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka-dev:9092}
+
+platform:
+  kafka:
+    partitions: 6
+  security:
+    paseto:
+      enabled: true
+      mode: public                        # dev uses the external v4.public token directly
+      public-key: ${PASETO_PUBLIC_KEY:}   # injected via K8s Secret — never committed
+      issuer: ${PASETO_ISSUER:auth.platform.internal}
+      audience: ${PASETO_AUDIENCE:media-pulse-iq}
+      token-header: ${PASETO_TOKEN_HEADER:Authorization}
+      clock-skew-seconds: 60
+
+logging:
+  level:
+    root: DEBUG
+    com.java: DEBUG
+

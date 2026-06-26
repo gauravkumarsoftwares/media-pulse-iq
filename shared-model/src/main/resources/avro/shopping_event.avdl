@@ -1,0 +1,86 @@
+@namespace("com.java.model")
+
+/**
+ * Avro IDL protocol for the shopping analytics platform (architecture §2.1).
+ *
+ * Wire format: Confluent Avro binary
+ *   Byte 0    : 0x00  (Confluent magic byte)
+ *   Bytes 1-4 : schema ID from Schema Registry (big-endian int)
+ *   Bytes 5+  : Avro binary-encoded record
+ *
+ * Subject strategy: TopicNameStrategy ({topic}-value).
+ * All three Kafka topics (raw, enriched, DLQ) carry this schema.
+ *
+ * Schema Registry upgrade path:
+ *   Set platform.schema-registry.url to your SR endpoint.
+ *   The Confluent KafkaAvroSerializer registers the schema automatically on
+ *   first message and caches the schema ID for subsequent calls.
+ */
+protocol ShoppingEventProtocol {
+
+  /**
+   * Canonical ad interaction / clickstream event shared by all three Kafka topics
+   * and all three services: ingestion-service, stream-processing-engine,
+   * insights-query-service.
+   */
+  record ShoppingEvent {
+
+    /** UUIDv4 unique identifier — Flink dedup key (§3.1). Must be supplied by the SDK. */
+    string eventId;
+
+    /**
+     * Retailer identifier (e.g. "walmart_us"). Bound from the verified
+     * X-Tenant-Context header, never the request body (architecture §6.1).
+     */
+    string tenantId;
+
+    /**
+     * Pseudonymised customer id.
+     * SHA-256 prefix applied before DLQ routing (§8.3).
+     */
+    union { null, string } userId = null;
+
+    /**
+     * Browser / app session id.
+     * Kafka partition key component (tenantId:sessionId, §2.2);
+     * Flink attribution join key (§3.2).
+     */
+    union { null, string } sessionId = null;
+
+    /**
+     * Ad campaign id. Null for non-ad events (e.g. PRODUCT_VIEW without impression).
+     * Populated on CLICK_TO_BASKET events from the matched CLICK's campaignId.
+     */
+    union { null, string } campaignId = null;
+
+    /**
+     * EventType name string.
+     * Valid values: UNSPECIFIED | IMPRESSION | CLICK | PRODUCT_VIEW
+     *               | ADD_TO_CART | PURCHASE | CLICK_TO_BASKET.
+     * CLICK_TO_BASKET is synthesized by the stream engine (§3.2).
+     */
+    string eventType;
+
+    /**
+     * Client-side event time as epoch milliseconds.
+     * Used as the Flink watermark timestamp
+     * (forBoundedOutOfOrderness 5 min, §3.3).
+     */
+    long eventTimestampMs;
+
+    /**
+     * Flattened cost_per_click (for CLICK/IMPRESSION) or item price
+     * (for PURCHASE). Defaults to 0.0 when not applicable.
+     */
+    double cost = 0.0;
+
+    /**
+     * Tenant-specific extension fields.
+     * On CLICK_TO_BASKET events the stream engine also writes:
+     *   "durationMs"        — milliseconds from CLICK to ADD_TO_CART
+     *   "attributedClickId" — the source CLICK's eventId
+     */
+    map<string> customTags = {};
+  }
+}
+

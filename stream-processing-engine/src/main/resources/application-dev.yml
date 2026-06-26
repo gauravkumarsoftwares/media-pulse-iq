@@ -1,0 +1,8 @@
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka-dev:9092}
+logging:
+  level:
+    root: DEBUG
+    com.java: DEBUG
+

@@ -1,0 +1,55 @@
+spring:
+  application:
+    name: stream-processing-engine
+  profiles:
+    default: local
+  kafka:
+    consumer:
+      group-id: "${platform.kafka.consumer-group.stream-engine}"
+
+server:
+  port: 8082
+
+platform:
+  attribution:
+    window-hours: 24
+  dedup:
+    ttl-minutes: 60
+  kafka:
+    # Logical environment prefix (see shared-model KafkaTopics for the full convention)
+    env: ${KAFKA_ENV:local}
+    topic:
+      # shared.event → raw ad-interaction stream, keyed by tenantId:sessionId
+      raw: "${platform.kafka.env}.shared.event.ads.clickstream.ad-interaction-received-by-tenant-session"
+      # internal.event → enriched + attributed events for Pinot and serving layer
+      # Consolidates the legacy 'aggregates' and 'enriched' topics into one.
+      # Key: tenantId:campaignId
+      enriched: "${platform.kafka.env}.internal.event.ads.attribution.ad-interaction-enriched-by-campaign"
+    consumer-group:
+      stream-engine: "${platform.kafka.env}.ads.stream-processing-engine"
+      insights-serving: "${platform.kafka.env}.ads.insights-query-service"
+  # ---- Flink DataStream job configuration ----
+  flink:
+    enabled: false
+    parallelism: 1
+    checkpoint-interval-ms: 30000
+    checkpoint-dir: ""
+    use-rocks-db: false
+    kafka-bootstrap-servers: ""
+    redis-host: ${REDIS_HOST:localhost}
+    redis-port: ${REDIS_PORT:6379}
+    redis-password: ${REDIS_PASSWORD:}
+    redis-database: 0
+    redis-ttl-seconds: 172800
+
+management:
+  server:
+    port: 9090
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true

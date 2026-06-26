@@ -1,0 +1,68 @@
+spring:
+  application:
+    name: ingestion-service
+  profiles:
+    default: local
+  kafka:
+    producer:
+      acks: all
+      retries: 3
+  # Redis for distributed per-tenant rate limiting
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+      lettuce:
+        pool:
+          max-active: 4
+          max-idle: 2
+          min-idle: 1
+
+server:
+  port: 8080
+
+platform:
+  kafka:
+    # Logical environment prefix injected into every topic and consumer-group name.
+    # Driven by the KAFKA_ENV env-var; falls back to 'local' for laptop development.
+    # Convention: {env}.{visibility}.{type}.{domain}.{subdomain}.{record}-by-{key}
+    env: ${KAFKA_ENV:local}
+    partitions: 1
+    topic:
+      # shared  → consumed across domain boundaries (stream-processing-engine)
+      # event   → something that happened (ad interaction received)
+      # key     → tenantId:sessionId  (session co-location for stateful joins)
+      raw: "${platform.kafka.env}.shared.event.ads.clickstream.ad-interaction-received-by-tenant-session"
+      # internal → within the ads domain only (SRE replay tooling)
+      # key      → tenantId
+      dlq: "${platform.kafka.env}.internal.event.ads.clickstream.ad-interaction-failed-by-tenant-id"
+    consumer-group:
+      stream-engine: "${platform.kafka.env}.ads.stream-processing-engine"
+      insights-serving: "${platform.kafka.env}.ads.insights-query-service"
+
+  # ---- Per-tenant rate limiting (architecture §6.2 — Noisy-Neighbour Protection) ----
+  # enforced=false → warn-only locally; set true in staging/prod
+  rate-limit:
+    enforced: false
+    default-events-per-second: 500
+    window-seconds: 1
+    redis-ttl-multiplier: 2
+    # Per-tenant overrides (uncomment and populate in K8s ConfigMap):
+    # tenant-overrides:
+    #   walmart_us: 10000
+    #   enterprise_tenant: 5000
+    #   free_tier_shop:     100
+
+management:
+  server:
+    port: 9090
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true

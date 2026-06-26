@@ -1,0 +1,14 @@
+spring:
+  kafka:
+    bootstrap-servers: localhost:9092
+
+platform:
+  security:
+    paseto:
+      enabled: false   # local dev only — trust gateway-injected X-Tenant-Context
+
+logging:
+  level:
+    root: INFO
+    com.java: DEBUG
+

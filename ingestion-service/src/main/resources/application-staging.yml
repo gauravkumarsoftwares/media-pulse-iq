@@ -1,0 +1,41 @@
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka-staging:9092}
+    producer:
+      retries: 5
+    properties:
+      # Broker client auth (OWASP A02); credentials via app-secrets env.
+      security.protocol: ${KAFKA_SECURITY_PROTOCOL:SASL_SSL}
+      sasl.mechanism: ${KAFKA_SASL_MECHANISM:SCRAM-SHA-512}
+
+platform:
+  kafka:
+    partitions: 64
+  security:
+    # Option C (token-exchange): verify the gateway-minted internal v4.local token.
+    paseto:
+      enabled: true
+      mode: local
+      local-key: ${PASETO_LOCAL_KEY:}
+      issuer: ${PASETO_ISSUER:edge}
+      audience: ${PASETO_AUDIENCE:media-pulse-iq}
+      token-header: ${PASETO_TOKEN_HEADER:X-Internal-Token}
+      clock-skew-seconds: 30
+
+logging:
+  level:
+    root: INFO
+    com.java: INFO
+
+management:
+  server:
+    port: 9090
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.java</groupId>
+        <artifactId>media-pulse-iq</artifactId>
+        <version>1.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+    <artifactId>shared-security</artifactId>
+    <packaging>jar</packaging>
+
+    <description>
+        Reusable security primitives for the platform. Provides in-service PASETO
+        token verifiers: v4.public (Ed25519) on the JDK 21 native EdDSA provider,
+        and v4.local (XChaCha20 + keyed BLAKE2b) for the internal token-exchange
+        leg (Option C). v4.local uses BouncyCastle for XChaCha20/BLAKE2b, which
+        the JDK does not expose natively.
+    </description>
+
+    <dependencies>
+        <!-- JSON claims parsing (version managed by the Spring Boot parent). -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <!-- XChaCha20 + BLAKE2b for PASETO v4.local (managed by the Spring Boot BOM). -->
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk18on</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
+

@@ -1,0 +1,15 @@
+spring:
+  kafka:
+    bootstrap-servers: localhost:9092
+platform:
+  # Confluent Schema Registry — local Docker Compose container.
+  schema-registry:
+    url: http://localhost:8081
+  security:
+    paseto:
+      enabled: false   # local dev only — trust gateway-injected X-Tenant-Context
+logging:
+  level:
+    root: INFO
+    com.java: DEBUG
+

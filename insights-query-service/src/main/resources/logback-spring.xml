@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logging hardening (OWASP A09):
+    * MASK_PATTERN redacts emails and IPv4 addresses from every log message.
+    * SECURITY_AUDIT is a dedicated, always-on (INFO) stream of key=value auth
+      events, routed to its own appender for SIEM scraping (additivity=false so
+      it is not duplicated into the root logger).
+-->
+<configuration>
+
+    <property name="MASK_PATTERN"
+              value="%replace(%replace(%msg){'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}','***@***'}){'\b(?:\d{1,3}\.){3}\d{1,3}\b','***.***.***.***'}"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - ${MASK_PATTERN}%n</pattern>
+        </encoder>
+    </appender>
+
+    <appender name="AUDIT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} AUDIT %-5level ${MASK_PATTERN}%n</pattern>
+        </encoder>
+    </appender>
+
+    <logger name="SECURITY_AUDIT" level="INFO" additivity="false">
+        <appender-ref ref="AUDIT"/>
+    </logger>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>
