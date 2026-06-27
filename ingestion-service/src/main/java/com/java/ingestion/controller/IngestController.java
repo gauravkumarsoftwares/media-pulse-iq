@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.*;
  * service is ever called; validation failures return {@code 422} via
  * {@link com.java.ingestion.common.GlobalExceptionHandler}.
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/v1/events")
 @RequiredArgsConstructor
