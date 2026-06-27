@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 import java.util.Optional;
 
 /**
- * Redis-backed hot-tier read store for campaign metrics (architecture §4).
+ * Redis-backed hot-tier read store for campaign metrics (architecture 4).
  *
  * <p>Hot counters are written by the Flink {@code RedisHotCounterSink} via atomic
  * {@code HINCRBY} operations. This component reads them with {@code HGET}.

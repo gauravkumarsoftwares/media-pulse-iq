@@ -3,7 +3,7 @@ package com.java.processing.sink;
 import com.java.model.ShoppingEvent;
 
 /**
- * Abstraction over the real-time serving store (architecture §4).
+ * Abstraction over the real-time serving store (architecture 4).
  *
  * <p>In production this writes enriched/aggregated rows to Apache Pinot (and hot
  * counters to Redis). The default implementation publishes to the aggregates

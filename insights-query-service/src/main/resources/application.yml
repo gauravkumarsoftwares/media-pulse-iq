@@ -47,7 +47,7 @@ platform:
     password: ${PINOT_PASSWORD:}
     auth-token: ${PINOT_AUTH_TOKEN:}
 
-  # ---- Trino / Iceberg cold-tier (query window > 30 days, architecture §4.3) ----
+  # ---- Trino / Iceberg cold-tier (query window > 30 days, architecture 4.3) ----
   trino:
     enabled: false                        # set true in staging/prod; false keeps StarTree fallback
     # Full JDBC URL — must include catalog and schema for HikariCP to work without USE statements.
@@ -69,7 +69,7 @@ platform:
     ssl-truststore-path: ${TRINO_SSL_TRUSTSTORE_PATH:}
     ssl-truststore-password: ${TRINO_SSL_TRUSTSTORE_PASSWORD:}
 
-  # ---- Periodic reconciliation (architecture §9.1) ----
+  # ---- Periodic reconciliation (architecture 9.1) ----
   reconciliation:
     enabled: true
     # Percentage drift allowed before flagging a discrepancy (e.g. 1.0 = 1 %)

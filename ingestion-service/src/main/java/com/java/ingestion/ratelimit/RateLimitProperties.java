@@ -9,7 +9,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Per-tenant rate-limit configuration (architecture §6.2 Noisy-Neighbour Protection).
+ * Per-tenant rate-limit configuration (architecture 6.2 Noisy-Neighbour Protection).
  *
  * <p>Bound from {@code platform.rate-limit.*} in application[-profile].yml.
  *

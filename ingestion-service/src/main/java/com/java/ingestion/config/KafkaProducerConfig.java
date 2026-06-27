@@ -21,7 +21,7 @@ import java.util.Map;
  * <p>Value serialiser: {@link ShoppingEventConfluentSerializer} — delegates to
  * Confluent {@code KafkaAvroSerializer}. Wire format: Confluent Avro binary
  * {@code [0x00][4-byte schemaId][Avro binary]}.
- * Schema registered/looked-up via {@code platform.schema-registry.url} (§2.1).
+ * Schema registered/looked-up via {@code platform.schema-registry.url} (2.1).
  *
  * <p>All connection + <strong>security</strong> settings (SASL_SSL / mTLS) are
  * sourced from {@link KafkaProperties} ({@code spring.kafka.*}) — no code change

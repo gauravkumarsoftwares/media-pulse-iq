@@ -15,7 +15,7 @@ import java.util.Map;
 
 /**
  * Flink serialisation schema that converts a {@link ShoppingEvent} POJO to a Confluent
- * Avro wire-format Kafka {@link ProducerRecord} (architecture §2.1, §3).
+ * Avro wire-format Kafka {@link ProducerRecord} (architecture 2.1, 3).
  *
  * <p>Wire format produced: {@code [0x00][4-byte schemaId][Avro binary]}.
  *
@@ -30,7 +30,7 @@ import java.util.Map;
  * {@code {topic}-value} (TopicNameStrategy).
  *
  * <p>Record key: {@code "{tenantId}:{campaignId}"} — ensures campaign aggregates
- * co-locate on the same Kafka partition for Pinot's consumption (architecture §2.3).
+ * co-locate on the same Kafka partition for Pinot's consumption (architecture 2.3).
  */
 public final class ShoppingEventSerializationSchema
         implements KafkaRecordSerializationSchema<ShoppingEvent> {

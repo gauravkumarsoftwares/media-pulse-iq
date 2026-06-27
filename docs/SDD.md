@@ -128,7 +128,7 @@ flowchart TB
 | 📊 **Marketer / Retailer** | Reads campaign analytics via the Insights Query API |
 | 🔧 **SRE / Ops** | Monitors pipeline health and triggers on-demand reconciliation |
 | 🔐 **Kong API Gateway** | Edge entry point — TLS termination, PASETO token validation, rate limiting, and token exchange (mints short-lived internal `v4.local` tokens) |
-| ⚙️ **Platform Core** | Three microservices + reconciliation jobs (detailed in §2.2) |
+| ⚙️ **Platform Core** | Three microservices + reconciliation jobs (detailed in 2.2) |
 | 📋 **Confluent Schema Registry** | Enforces Avro schema compatibility for all Kafka topics |
 | 🗄️ **AWS S3 / Iceberg** | Cold archive for events older than 30 days |
 | 📈 **Prometheus + Grafana** | Collects Micrometer metrics; 12-panel operational dashboard |

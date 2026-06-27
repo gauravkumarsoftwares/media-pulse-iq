@@ -4,7 +4,7 @@ import com.java.query.dto.CampaignMetricResponse;
 import com.java.security.paseto.PasetoClaims;
 
 /**
- * Read-path service contract for campaign metric queries (architecture §5).
+ * Read-path service contract for campaign metric queries (architecture 5).
  *
  * <p>Encapsulates input validation, per-campaign authorization, tier routing,
  * and query execution so the controller stays thin.

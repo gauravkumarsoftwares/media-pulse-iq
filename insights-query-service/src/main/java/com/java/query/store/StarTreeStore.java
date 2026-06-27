@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.LongAdder;
 
 /**
  * In-memory, multi-dimensional aggregation store standing in for Apache Pinot's
- * Star-Tree index (architecture §4). Counts are keyed by
+ * Star-Tree index (architecture 4). Counts are keyed by
  * (tenant_id, campaign_id, event_type) and incremented with lock-free adders
  * for O(1) writes and reads.
  *

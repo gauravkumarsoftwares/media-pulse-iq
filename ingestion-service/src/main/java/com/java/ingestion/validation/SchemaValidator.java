@@ -8,7 +8,7 @@ import java.util.Optional;
 
 /**
  * Lightweight schema validator standing in for the Confluent Schema Registry
- * check described in §2.2. Enforces presence of mandatory identity fields and
+ * check described in 2.2. Enforces presence of mandatory identity fields and
  * a recognized event type before an event is admitted to the stream.
  */
 @Component

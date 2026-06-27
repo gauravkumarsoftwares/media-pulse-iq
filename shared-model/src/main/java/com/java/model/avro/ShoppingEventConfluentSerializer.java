@@ -9,7 +9,7 @@ import java.util.Map;
 
 /**
  * Kafka {@link Serializer} for {@link ShoppingEvent} using the Confluent Avro wire format
- * (architecture §2.1).
+ * (architecture 2.1).
  *
  * <p>Wire format produced: {@code [0x00][4-byte schemaId][Avro binary]}.
  *

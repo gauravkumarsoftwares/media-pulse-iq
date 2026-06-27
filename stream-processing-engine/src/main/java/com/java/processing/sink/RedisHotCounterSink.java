@@ -10,7 +10,7 @@ import redis.clients.jedis.JedisPoolConfig;
 
 /**
  * Flink {@link RichSinkFunction} that increments campaign hot-counters in Redis
- * using atomic {@code HINCRBY} operations (architecture §4, hot tier &lt;48 h).
+ * using atomic {@code HINCRBY} operations (architecture 4, hot tier &lt;48 h).
  *
  * <p><strong>Key schema:</strong> {@code campaign:{tenantId}:{campaignId}}
  * <br><strong>Hash field:</strong> {@code eventType} (CLICK, IMPRESSION, CLICK_TO_BASKET …)

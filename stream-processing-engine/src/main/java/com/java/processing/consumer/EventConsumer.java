@@ -15,7 +15,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Core stream pipeline: consume raw → deduplicate → stateful join →
- * sink enriched events to the serving layer (architecture §3).
+ * sink enriched events to the serving layer (architecture 3).
  *
  * <p><strong>Fallback mode only.</strong> This Spring-Kafka consumer is active
  * when {@code platform.flink.enabled=false} (local / dev).
@@ -29,7 +29,7 @@ public final class EventConsumer {
     private final Deduplicator deduplicator;
     private final StatefulJoiner statefulJoiner;
     private final PinotSink pinotSink;
-    private final IcebergS3Sink icebergSink;   // data-lake write path (architecture §1, §3.3)
+    private final IcebergS3Sink icebergSink;   // data-lake write path (architecture 1, 3.3)
     private final ProcessingMetrics metrics;
 
 
@@ -55,7 +55,7 @@ public final class EventConsumer {
         pinotSink.upsert(event);
         metrics.recordProcessed(event.getTenantId(), event.getEventType());
 
-        // 3. Append raw event to Iceberg data lake (§1: Flink → Append Row-level Events → Iceberg).
+        // 3. Append raw event to Iceberg data lake (1: Flink → Append Row-level Events → Iceberg).
         //    Provides source-of-truth for cold queries (Trino >30d) + billing reconciliation.
         icebergSink.append(event);
 

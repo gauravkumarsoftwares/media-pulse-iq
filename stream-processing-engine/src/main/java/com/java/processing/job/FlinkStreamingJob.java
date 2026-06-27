@@ -29,7 +29,7 @@ import java.time.Duration;
 
 /**
  * Apache Flink DataStream job — the production stream-processing topology
- * (architecture §3).
+ * (architecture 3).
  *
  * <p>Pipeline:
  * <pre>
@@ -109,7 +109,7 @@ public class FlinkStreamingJob {
                 .build();
 
         DataStream<ShoppingEvent> rawStream = env
-                // Architecture §3.3: bounded out-of-orderness watermark (5 min tolerance)
+                // Architecture 3.3: bounded out-of-orderness watermark (5 min tolerance)
                 // allows Flink to process events up to 5 minutes late without dropping them.
                 // Events arriving later than 5 min are routed to a side output / DLQ.
                 .fromSource(kafkaSource,

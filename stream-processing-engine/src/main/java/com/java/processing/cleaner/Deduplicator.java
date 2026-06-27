@@ -7,7 +7,7 @@ import java.time.Duration;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Idempotent stream deduplication filter (architecture §3.1).
+ * Idempotent stream deduplication filter (architecture 3.1).
  * Backed by a concurrent map with TTL eviction to keep memory bounded —
  * the in-process analogue of Flink's RocksDB keyed state with a configurable TTL.
  */

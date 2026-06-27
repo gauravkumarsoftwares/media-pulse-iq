@@ -26,7 +26,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Production cold-tier query client for Trino-on-Iceberg (architecture §4.3).
+ * Production cold-tier query client for Trino-on-Iceberg (architecture 4.3).
  *
  * <h2>Why Trino + Iceberg for cold reads?</h2>
  * <p>Events older than 30 days are stored as Parquet files in an Apache Iceberg table

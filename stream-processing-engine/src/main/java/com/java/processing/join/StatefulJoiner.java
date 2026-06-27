@@ -10,7 +10,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Sessionized stateful attribution join (architecture §3.2).
+ * Sessionized stateful attribution join (architecture 3.2).
  *
  * <p>Keeps the last ad click per session and, when an ADD_TO_CART arrives within
  * the attribution window, synthesizes a CLICK_TO_BASKET event attributed to the
@@ -51,7 +51,7 @@ public final class StatefulJoiner {
                 long delta = event.getEventTimestampMs() - click.getEventTimestampMs();
                 boolean withinWindow = delta >= 0 && delta <= attributionWindowMs;
                 if (withinWindow && attributedSessions.putIfAbsent(sessionId, Boolean.TRUE) == null) {
-                    // Time-to-basket conversion speed (architecture §3.2), carried as a tag
+                    // Time-to-basket conversion speed (architecture 3.2), carried as a tag
                     // since the flattened model has no dedicated duration column.
                     Map<String, String> tags = new HashMap<>();
                     tags.put("durationMs", Long.toString(delta));

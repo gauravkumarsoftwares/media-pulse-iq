@@ -11,7 +11,7 @@ import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.util.Collector;
 
 /**
- * Flink idempotent deduplication operator (architecture §3.1).
+ * Flink idempotent deduplication operator (architecture 3.1).
  *
  * <p>Keyed by {@code eventId}. For each event, it checks whether an identical ID
  * has been processed within the configured TTL window; if so it is silently

@@ -4,7 +4,7 @@ import com.java.ingestion.dto.IngestEventRequest;
 import com.java.ingestion.dto.IngestEventResponse;
 
 /**
- * Write-path service contract (CQRS, architecture §2).
+ * Write-path service contract (CQRS, architecture 2).
  *
  * <p>Isolates the controller from all business logic: rate limiting, schema
  * validation, DLQ routing, and Kafka publish. Implementations throw

@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * Externalised configuration for the embedded Apache Flink job (architecture §3).
+ * Externalised configuration for the embedded Apache Flink job (architecture 3).
  *
  * <p>Bound from {@code platform.flink.*} in application[-profile].yml.
  * All values have safe defaults that work in a local mini-cluster environment;
@@ -27,7 +27,7 @@ public class FlinkProperties {
 
     /**
      * Default operator parallelism. For production Flink clusters, align this
-     * with the number of Kafka partitions (architecture §2.2).
+     * with the number of Kafka partitions (architecture 2.2).
      */
     private int parallelism = 1;
 
@@ -77,7 +77,7 @@ public class FlinkProperties {
      * {@link com.java.processing.operator.ShoppingEventDeserializationSchema} and
      * {@link com.java.processing.operator.ShoppingEventSerializationSchema} to
      * initialise their transient {@code KafkaAvroDeserializer} / {@code KafkaAvroSerializer}
-     * instances (architecture §2.1).
+     * instances (architecture 2.1).
      *
      * <p>Defaults to local Confluent Platform / Docker Compose endpoint.
      * Override to e.g. {@code https://psrc-xxxxx.us-east-2.aws.confluent.cloud} for

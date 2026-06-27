@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * Externalised configuration for the Trino/Iceberg cold-tier connection (architecture §4.3).
+ * Externalised configuration for the Trino/Iceberg cold-tier connection (architecture 4.3).
  *
  * <p>Bound from {@code platform.trino.*} in application[-profile].yml.
  *

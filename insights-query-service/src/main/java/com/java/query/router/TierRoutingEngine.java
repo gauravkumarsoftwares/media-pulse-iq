@@ -6,7 +6,7 @@ import java.time.Duration;
 import java.time.Instant;
 
 /**
- * Time-boundary routing engine for the hybrid read path (architecture §5.2).
+ * Time-boundary routing engine for the hybrid read path (architecture 5.2).
  *
  * <p>Selects the serving tier based on how far back the query window reaches:
  * <ul>

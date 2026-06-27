@@ -8,7 +8,7 @@ import com.java.query.dto.ReconciliationSummaryDto;
 import java.util.Map;
 
 /**
- * Reconciliation query/trigger service contract (architecture §9.1).
+ * Reconciliation query/trigger service contract (architecture 9.1).
  *
  * <p>Decouples the REST controller from {@link com.java.query.reconciliation.ReconciliationJob}
  * and {@link com.java.query.reconciliation.ReconciliationStore} so each class has a

@@ -110,7 +110,7 @@ return new PasetoV4PublicVerifier(publicKey, issuer, audience, clockSkew);
 
 Verifies externally-signed `v4.public` tokens (used when `mode=public`).
 
-**Verification steps (PASETO spec §v4.public):**
+**Verification steps (PASETO spec v4.public):**
 
 1. Assert the token starts with `v4.public.`
 2. Base64url-decode the payload into `message ‖ signature(64 bytes)`
@@ -138,7 +138,7 @@ The implementation uses the **JDK 21 native `Ed25519` provider** — no BouncyCa
 
 Verifies gateway-minted `v4.local` tokens (used when `mode=local`, the deployed default — Option C).
 
-**Decryption steps (PASETO spec §v4.local):**
+**Decryption steps (PASETO spec v4.local):**
 
 1. Assert the token starts with `v4.local.`
 2. Base64url-decode body into `nonce(32) ‖ ciphertext ‖ tag(32)`

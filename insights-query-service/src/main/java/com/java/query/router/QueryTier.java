@@ -1,7 +1,7 @@
 package com.java.query.router;
 
 /**
- * Serving tiers for the hybrid read path (architecture §5.2). Each tier maps to
+ * Serving tiers for the hybrid read path (architecture 5.2). Each tier maps to
  * a backing store and the {@code source} label surfaced in API responses.
  */
 public enum QueryTier {

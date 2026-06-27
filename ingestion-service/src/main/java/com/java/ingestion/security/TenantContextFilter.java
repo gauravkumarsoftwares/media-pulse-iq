@@ -11,7 +11,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 
 /**
- * Edge multi-tenancy guard (architecture §6.1).
+ * Edge multi-tenancy guard (architecture 6.1).
  *
  * <p>Ensures every ingest request carries an {@code X-Tenant-Context} claim
  * (injected by the gateway after PASETO validation). Requests to the ingest

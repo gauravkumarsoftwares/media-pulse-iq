@@ -43,7 +43,7 @@ public class IngestionServiceImpl implements IngestionService {
     public IngestEventResponse ingest(IngestEventRequest request, String tenantId) {
         Timer.Sample sample = metrics.startTimer();
 
-        // Per-tenant rate limiting (architecture §6.2 — noisy-neighbour protection)
+        // Per-tenant rate limiting (architecture 6.2 — noisy-neighbour protection)
         if (!rateLimiter.isAllowed(tenantId)) {
             metrics.stopTimer(sample, tenantId, "rate_limited");
             throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,

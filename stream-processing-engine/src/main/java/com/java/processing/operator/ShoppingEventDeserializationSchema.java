@@ -17,7 +17,7 @@ import java.util.Map;
 
 /**
  * Flink deserialization schema that converts Confluent Avro wire-format Kafka records
- * into {@link ShoppingEvent} POJOs (architecture §2.1, §3).
+ * into {@link ShoppingEvent} POJOs (architecture 2.1, 3).
  *
  * <p>Wire format consumed: {@code [0x00][4-byte schemaId][Avro binary]}.
  *

@@ -27,7 +27,7 @@ import java.util.Map;
  * producer: {@link ShoppingEventConfluentSerializer}.
  * Both delegate to the Confluent {@code KafkaAvroDeserializer} /
  * {@code KafkaAvroSerializer} and share the same Schema Registry endpoint
- * ({@code platform.schema-registry.url}, §2.1).
+ * ({@code platform.schema-registry.url}, 2.1).
  *
  * <p>The Flink production path uses
  * {@link com.java.processing.operator.ShoppingEventDeserializationSchema} and

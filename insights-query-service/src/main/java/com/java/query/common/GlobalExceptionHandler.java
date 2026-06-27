@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.util.List;
 
 /**
- * Centralized exception handler for the insights-query-service (API Guideline §3).
+ * Centralized exception handler for the insights-query-service (API Guideline 3).
  * Maps all controller exceptions to a uniform {@link ApiErrorResponse} envelope.
  */
 @RestControllerAdvice

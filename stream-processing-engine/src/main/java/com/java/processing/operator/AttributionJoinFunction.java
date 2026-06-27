@@ -15,7 +15,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Flink sessionized attribution join operator (architecture §3.2).
+ * Flink sessionized attribution join operator (architecture 3.2).
  *
  * <p>Keyed by {@code sessionId}. Maintains two pieces of per-session state:
  * <ol>

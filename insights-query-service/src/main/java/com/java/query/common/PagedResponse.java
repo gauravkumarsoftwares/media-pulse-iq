@@ -3,7 +3,7 @@ package com.java.query.common;
 import java.util.List;
 
 /**
- * Generic paginated response envelope (API Guideline §3).
+ * Generic paginated response envelope (API Guideline 3).
  *
  * @param <T>       item type
  * @param items     the result page

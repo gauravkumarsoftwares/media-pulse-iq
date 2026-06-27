@@ -15,7 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 /**
- * Edge ingestion REST controller — CQRS Write Path (architecture §2).
+ * Edge ingestion REST controller — CQRS Write Path (architecture 2).
  *
  * <p>URI: {@code POST /api/v1/events}. Deliberately thin: it extracts the
  * tenant identity and delegates all business logic to {@link IngestionService}.

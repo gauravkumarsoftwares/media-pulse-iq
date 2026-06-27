@@ -14,7 +14,7 @@ import java.util.Base64;
  * Verifier for PASETO {@code v4.public} tokens (Ed25519 signatures), implemented
  * on the JDK 21 native EdDSA provider.
  *
- * <p>Verification steps (PASETO spec, §v4.public):
+ * <p>Verification steps (PASETO spec, v4.public):
  * <ol>
  *   <li>Assert the token starts with {@code v4.public.}</li>
  *   <li>Base64url-decode the payload into {@code message || signature(64B)}</li>

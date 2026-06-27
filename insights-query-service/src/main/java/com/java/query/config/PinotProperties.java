@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * Externalised configuration for the Apache Pinot broker connection (architecture §4).
+ * Externalised configuration for the Apache Pinot broker connection (architecture 4).
  *
  * <p>Bound from {@code platform.pinot.*} in application[-profile].yml.
  *

@@ -16,7 +16,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Apache Pinot query client for the warm serving tier (architecture §4).
+ * Apache Pinot query client for the warm serving tier (architecture 4).
  *
  * <p>Uses the <strong>native Apache Pinot Java SDK</strong>
  * ({@code pinot-java-client} — {@link Connection} /

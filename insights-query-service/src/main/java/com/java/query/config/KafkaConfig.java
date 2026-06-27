@@ -22,7 +22,7 @@ import java.util.Map;
  * {@code [0x00][4-byte schemaId][Avro binary]}.
  * Value deserialiser: {@link ShoppingEventConfluentDeserializer} — delegates to
  * Confluent {@code KafkaAvroDeserializer}. Schema looked-up from Schema Registry
- * ({@code platform.schema-registry.url}, §2.1).
+ * ({@code platform.schema-registry.url}, 2.1).
  *
  * <p>Security (SASL_SSL / mTLS) is driven by {@code spring.kafka.properties.*}
  * via {@link KafkaProperties} (OWASP A02).

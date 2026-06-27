@@ -1,7 +1,7 @@
 @namespace("com.java.model")
 
 /**
- * Avro IDL protocol for the shopping analytics platform (architecture §2.1).
+ * Avro IDL protocol for the shopping analytics platform (architecture 2.1).
  *
  * Wire format: Confluent Avro binary
  *   Byte 0    : 0x00  (Confluent magic byte)
@@ -25,25 +25,25 @@ protocol ShoppingEventProtocol {
    */
   record ShoppingEvent {
 
-    /** UUIDv4 unique identifier — Flink dedup key (§3.1). Must be supplied by the SDK. */
+    /** UUIDv4 unique identifier — Flink dedup key (3.1). Must be supplied by the SDK. */
     string eventId;
 
     /**
      * Retailer identifier (e.g. "walmart_us"). Bound from the verified
-     * X-Tenant-Context header, never the request body (architecture §6.1).
+     * X-Tenant-Context header, never the request body (architecture 6.1).
      */
     string tenantId;
 
     /**
      * Pseudonymised customer id.
-     * SHA-256 prefix applied before DLQ routing (§8.3).
+     * SHA-256 prefix applied before DLQ routing (8.3).
      */
     union { null, string } userId = null;
 
     /**
      * Browser / app session id.
-     * Kafka partition key component (tenantId:sessionId, §2.2);
-     * Flink attribution join key (§3.2).
+     * Kafka partition key component (tenantId:sessionId, 2.2);
+     * Flink attribution join key (3.2).
      */
     union { null, string } sessionId = null;
 
@@ -57,14 +57,14 @@ protocol ShoppingEventProtocol {
      * EventType name string.
      * Valid values: UNSPECIFIED | IMPRESSION | CLICK | PRODUCT_VIEW
      *               | ADD_TO_CART | PURCHASE | CLICK_TO_BASKET.
-     * CLICK_TO_BASKET is synthesized by the stream engine (§3.2).
+     * CLICK_TO_BASKET is synthesized by the stream engine (3.2).
      */
     string eventType;
 
     /**
      * Client-side event time as epoch milliseconds.
      * Used as the Flink watermark timestamp
-     * (forBoundedOutOfOrderness 5 min, §3.3).
+     * (forBoundedOutOfOrderness 5 min, 3.3).
      */
     long eventTimestampMs;
 

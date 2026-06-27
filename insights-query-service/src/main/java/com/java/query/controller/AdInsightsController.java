@@ -14,7 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 /**
- * Campaign Insights REST API (architecture §5.1).
+ * Campaign Insights REST API (architecture 5.1).
  *
  * <p>URI prefix: {@code /api/v1/campaigns}. Deliberately thin — all validation,
  * authorization, tier routing, and query execution are delegated to

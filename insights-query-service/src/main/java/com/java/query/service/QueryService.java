@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Read-side query abstraction (Interface Segregation, architecture §5).
+ * Read-side query abstraction (Interface Segregation, architecture 5).
  */
 public interface QueryService {
 
@@ -20,7 +20,7 @@ public interface QueryService {
     long getCampaignCount(String tenantId, String campaignId, String metricType);
 
     /**
-     * Time-bounded overload that enables tier routing (§5.2).
+     * Time-bounded overload that enables tier routing (5.2).
      *
      * @param from  start of the query window; {@code null} implies the hot window
      */

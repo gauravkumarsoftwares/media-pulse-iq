@@ -9,7 +9,7 @@ import java.time.Duration;
 
 /**
  * Distributed per-tenant rate limiter using Redis atomic counters
- * (architecture §6.2 — Noisy-Neighbour Protection).
+ * (architecture 6.2 — Noisy-Neighbour Protection).
  *
  * <h2>Algorithm: Fixed-Window Counter (Redis INCR + EXPIRE)</h2>
  * <pre>

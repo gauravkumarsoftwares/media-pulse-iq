@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 
 /**
- * REST API for the reconciliation sub-system (architecture §9.1).
+ * REST API for the reconciliation sub-system (architecture 9.1).
  *
  * <pre>
  *   GET  /api/v1/reconciliation/status                  — latest run summary per window

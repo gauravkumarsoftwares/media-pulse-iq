@@ -42,7 +42,7 @@ platform:
       stream-engine: "${platform.kafka.env}.ads.stream-processing-engine"
       insights-serving: "${platform.kafka.env}.ads.insights-query-service"
 
-  # ---- Per-tenant rate limiting (architecture §6.2 — Noisy-Neighbour Protection) ----
+  # ---- Per-tenant rate limiting (architecture 6.2 — Noisy-Neighbour Protection) ----
   # enforced=false → warn-only locally; set true in staging/prod
   rate-limit:
     enforced: false

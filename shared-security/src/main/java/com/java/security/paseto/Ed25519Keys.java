@@ -57,7 +57,7 @@ public final class Ed25519Keys {
     /**
      * Build an {@link java.security.interfaces.EdECPublicKey} from the 32-byte
      * raw encoding: little-endian {@code y} with the x-coordinate sign in the
-     * MSB of the final byte (RFC 8032 §5.1.2).
+     * MSB of the final byte (RFC 8032 5.1.2).
      */
     private static PublicKey fromRaw(byte[] raw) throws Exception {
         byte[] little = raw.clone();

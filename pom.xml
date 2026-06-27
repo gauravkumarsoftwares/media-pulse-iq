@@ -46,7 +46,7 @@
         <maven-jar-plugin.version>3.4.1</maven-jar-plugin.version>
         <!-- BouncyCastle (XChaCha20 + BLAKE2b for PASETO v4.local); not managed by the Spring Boot BOM. -->
         <bouncycastle.version>1.84</bouncycastle.version>
-        <!-- Apache Avro: Kafka wire format for all ShoppingEvent topics (§2.1). -->
+        <!-- Apache Avro: Kafka wire format for all ShoppingEvent topics (2.1). -->
         <avro.version>1.11.3</avro.version>
         <!-- Confluent: KafkaAvroSerializer / KafkaAvroDeserializer + Schema Registry. -->
         <confluent.version>7.7.1</confluent.version>
@@ -59,7 +59,7 @@
         <flink.connector.kafka.version>3.2.0-1.19</flink.connector.kafka.version>
         <!-- Apache Pinot Java client: native async SDK (JsonAsyncHttpPinotClientTransportFactory) -->
         <pinot.client.version>1.3.0</pinot.client.version>
-        <!-- Trino JDBC: cold-tier federated queries over Iceberg/S3 Parquet (§4.3) -->
+        <!-- Trino JDBC: cold-tier federated queries over Iceberg/S3 Parquet (4.3) -->
         <trino.jdbc.version>455</trino.jdbc.version>
     </properties>
 
@@ -149,7 +149,7 @@
                 <version>${bouncycastle.version}</version>
             </dependency>
 
-            <!-- Apache Avro — Kafka wire-format serialisation for ShoppingEvent (§2.1) -->
+            <!-- Apache Avro — Kafka wire-format serialisation for ShoppingEvent (2.1) -->
             <dependency>
                 <groupId>org.apache.avro</groupId>
                 <artifactId>avro</artifactId>

@@ -6,7 +6,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
- * Reference-build stub for {@link IcebergS3Sink} (architecture §1, §3.3).
+ * Reference-build stub for {@link IcebergS3Sink} (architecture 1, 3.3).
  *
  * <p>Logs the write intent so the data-lake path is observable in local/dev mode.
  * In production, replace with the Apache Iceberg Flink connector

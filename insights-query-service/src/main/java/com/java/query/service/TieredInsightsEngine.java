@@ -25,7 +25,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Production {@link QueryService} routing to the three serving tiers (architecture §5.2).
+ * Production {@link QueryService} routing to the three serving tiers (architecture 5.2).
  *
  * <h3>Tier routing</h3>
  * <pre>

@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.util.List;
 
 /**
- * Centralized exception handler (OWASP A05 / API Guideline §3).
+ * Centralized exception handler (OWASP A05 / API Guideline 3).
  *
  * <p>Intercepts all controller exceptions and maps them to a uniform
  * {@link ApiErrorResponse} JSON envelope so clients always receive a

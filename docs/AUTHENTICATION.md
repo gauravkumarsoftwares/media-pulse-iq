@@ -3,7 +3,7 @@
 > **Status:** Reference architecture + current implementation
 > **Last validated:** 2026-06-26 (code review — all gaps below resolved)
 > **Audience:** Platform engineers, SREs, security reviewers, integrators
-> **Related:** `architecture.md` §6 (Multi-Tenancy & Logical Data Isolation)
+> **Related:** `architecture.md` 6 (Multi-Tenancy & Logical Data Isolation)
 
 This document describes, end to end, how requests are authenticated and how
 tenant identity flows through the Streaming Insight Platform. The model is
@@ -81,7 +81,7 @@ The original tradeoff — internal services *blindly trust* the header — has b
 verify the token themselves and derive the tenant from verified claims. The
 header-trust behaviour now applies **only** to local development
 (`paseto.enabled=false`), where the network is a single controlled trust zone
-(see §2) and the header is still stripped/overwritten at the edge (see §6).
+(see 2) and the header is still stripped/overwritten at the edge (see 6).
 
 ---
 
@@ -110,7 +110,7 @@ header-trust behaviour now applies **only** to local development
   shared symmetric key and derive the tenant from its claims. They no longer have
   to trust the network — the token itself is authenticated in-process. (When
   verification is disabled for local dev, they fall back to trusting
-  `X-Tenant-Context`, which the gateway still strips/injects — see §6.)
+  `X-Tenant-Context`, which the gateway still strips/injects — see 6.)
 
 ---
 
@@ -247,7 +247,7 @@ The gateway is the **policy enforcement point (PEP)**. On every request it:
 5. **Token exchange (Option C):** mints a short-lived internal **`v4.local`**
    token with the verified claims (shared symmetric key), and **consumes** the
    external token (does not forward it).
-6. **Sanitizes + injects headers** (see §6): strips client `X-Internal-Token` /
+6. **Sanitizes + injects headers** (see 6): strips client `X-Internal-Token` /
    `X-Tenant-Context`, then injects the minted internal token + tenant.
 7. **Forwards** the request into the trusted zone, or returns **401/403/429**.
 
@@ -280,7 +280,7 @@ The contract between the gateway and all services:
 
 > With Option C enabled (the deployed default), services do **not** rely on the
 > network at all: the internal `v4.local` token is authenticated in-process and
-> `X-Tenant-Context` is rewritten from its verified claims (see §7.1, §13). In
+> `X-Tenant-Context` is rewritten from its verified claims (see 7.1, 13). In
 > local dev (`enabled=false`), services fall back to trusting `X-Tenant-Context`,
 > which is safe only because the gateway strips/injects it and services aren't
 > directly reachable.
@@ -380,12 +380,12 @@ Key properties:
   enforces `read:ads`. Missing scope → **403** immediately after token
   verification.
 - **Claims exposed for authorization.** The full `PasetoClaims` are placed in the
-  `pasetoClaims` request attribute for per-campaign checks (see §8).
+  `pasetoClaims` request attribute for per-campaign checks (see 8).
 - **Audit trail.** Every allow/deny is emitted to a dedicated `SECURITY_AUDIT`
   logger for SIEM ingestion (OWASP A09).
 - **Pass-through when disabled.** If `paseto.enabled=false`, no verifier bean is
   created, `shouldNotFilter` returns `true`, and the legacy header-trust path
-  (§7.3/§7.4) applies — intended for local development only.
+  (7.3/7.4) applies — intended for local development only.
 
 ### 7.2. Fail-Closed Wiring
 
@@ -505,7 +505,7 @@ private ResponseEntity<Map<String, Object>> respond(
                 .body(Map.of("error", "Not authorized for campaign: " + campaignId));
     }
     long total = queryService.getCampaignCount(tenant, campaignId, metricType);
-    // ... response includes tenantId + tier-derived source (§8/§5.2).
+    // ... response includes tenantId + tier-derived source (8/5.2).
 }
 ```
 
@@ -513,7 +513,7 @@ private ResponseEntity<Map<String, Object>> respond(
   which enforces the header, input allow-lists, and `allowed_campaigns`.
 - The `read:ads` **scope** is enforced earlier, in `PasetoAuthenticationFilter`.
 - The validated `tenant` is passed into `QueryService` so it becomes part of the
-  data-access predicate (RLS, §8).
+  data-access predicate (RLS, 8).
 
 ---
 
@@ -542,7 +542,7 @@ WHERE  campaign_id = 'cmp_456'
   absent).
 - Responses echo `tenantId` so integrators can assert correct scoping.
 
-This is the platform's **logical zero-trust isolation** (architecture §6.1):
+This is the platform's **logical zero-trust isolation** (architecture 6.1):
 identity is enforced at the gateway, and isolation is enforced again at the data
 predicate.
 
@@ -724,7 +724,7 @@ shared `shared-security` module and wired into both HTTP services.
 3. **`PasetoSecurityConfig`** — builds the verifier for the configured `mode`
    (`local`/`public`) + **fail-closed startup guard** (mode-aware key check).
 4. **`PasetoProperties`** — binds `platform.security.paseto.*` incl. `mode` and
-   `local-key` (see §9).
+   `local-key` (see 9).
 5. **Authorization** — `write:events` scope enforced in the **ingestion** filter;
    `read:ads` scope enforced in the **insights** filter; `allowed_campaigns`
    enforced per-campaign in the insights controller.

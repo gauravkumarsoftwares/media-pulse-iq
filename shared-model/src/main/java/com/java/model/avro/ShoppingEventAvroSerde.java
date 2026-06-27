@@ -14,7 +14,7 @@ import java.util.Map;
 
 /**
  * POJO ↔ Avro {@link GenericRecord} mapping utilities for {@link ShoppingEvent}
- * (architecture §2.1).
+ * (architecture 2.1).
  *
  * <p>The Avro schema is defined in
  * {@code shared-model/src/main/resources/avro/shopping_event.avdl} (Avro IDL format)
