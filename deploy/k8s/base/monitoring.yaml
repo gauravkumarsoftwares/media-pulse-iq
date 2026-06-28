@@ -1,0 +1,206 @@
+# =====================================================================
+# Kubernetes Prometheus Operator resources — Ad Analytics Platform
+# Apply with: kubectl apply -f monitoring.yaml -n <namespace>
+# Requires: Prometheus Operator (kube-prometheus-stack or standalone)
+# =====================================================================
+
+---
+# ServiceMonitor: tells Prometheus Operator how to scrape the three services.
+# Each service exposes metrics on management port 9090, path /actuator/prometheus.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ad-analytics-services
+  labels:
+    release: kube-prometheus-stack   # must match the Prometheus Operator's serviceMonitorSelector
+spec:
+  selector:
+    matchLabels:
+      monitoring: ad-analytics
+  endpoints:
+    - port: management          # the named port 9090 in each Service spec
+      path: /actuator/prometheus
+      interval: 15s
+      scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+      - ad-analytics-prod       # update per environment
+
+---
+# OB-3: ServiceMonitor for the Flink embedded Prometheus reporter (port 9249).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ad-analytics-flink-metrics
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: stream-processing-engine
+  endpoints:
+    - port: flink-metrics       # named port 9249 in stream-processing-engine Service
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+      - ad-analytics-prod
+
+---
+# PrometheusRule: imports the PromQL alert rules from alert-rules.yml
+# into the Prometheus Operator managed Prometheus instance.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ad-analytics-alert-rules
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+
+    - name: ingestion
+      rules:
+        - alert: HighDlqRate
+          expr: sum(rate(ads_events_dlq_total[5m])) by (tenantId) > 100
+          for: 2m
+          labels: { severity: warning, service: ingestion-service }
+          annotations:
+            summary: "High DLQ rate for tenant {{ $labels.tenantId }}"
+            description: ">100 events/s routed to DLQ. Check schema validation failures."
+
+        - alert: CriticalDlqRate
+          expr: sum(rate(ads_events_dlq_total[5m])) by (tenantId) > 1000
+          for: 1m
+          labels: { severity: critical, service: ingestion-service }
+          annotations:
+            summary: "Critical DLQ rate (>1000/s) for {{ $labels.tenantId }}"
+            description: "Systematic schema failures or producer bug. Immediate action required."
+
+        - alert: IngestLatencyHigh
+          expr: |
+            histogram_quantile(0.99, sum(rate(ads_ingest_latency_seconds_bucket[5m])) by (le)) > 0.5
+          for: 3m
+          labels: { severity: warning, service: ingestion-service }
+          annotations:
+            summary: "p99 ingest latency > 500 ms"
+            description: "Check Kafka broker health and producer acks config."
+
+        - alert: IngestServiceDown
+          expr: up{job="ingestion-service"} == 0
+          for: 1m
+          labels: { severity: critical }
+          annotations: { summary: "Ingestion service is DOWN" }
+
+    - name: stream-processing
+      rules:
+        - alert: KafkaConsumerLagHigh
+          expr: kafka_consumer_group_lag{consumergroup=~".*stream-processing-engine.*"} > 500000
+          for: 5m
+          labels: { severity: warning, service: stream-processing-engine }
+          annotations:
+            summary: "Consumer lag > 500 k events"
+            description: "Scale up stream-processing-engine replicas (KEDA lagThreshold)."
+
+        - alert: KafkaConsumerLagCritical
+          expr: kafka_consumer_group_lag{consumergroup=~".*stream-processing-engine.*"} > 5000000
+          for: 2m
+          labels: { severity: critical, service: stream-processing-engine }
+          annotations: { summary: "Kafka lag > 5 M — real-time freshness severely degraded" }
+
+        - alert: HighDedupDropRate
+          expr: |
+            sum(rate(ads_events_dedup_dropped_total[5m])) /
+            sum(rate(ads_events_processed_total[5m])) > 0.10
+          for: 5m
+          labels: { severity: warning, service: stream-processing-engine }
+          annotations:
+            summary: "Dedup drop rate > 10% — possible replay or consumer restart"
+
+        - alert: StreamProcessingDown
+          expr: up{job="stream-processing-engine"} == 0
+          for: 1m
+          labels: { severity: critical }
+          annotations: { summary: "Stream processing engine is DOWN" }
+
+    - name: insights-query
+      rules:
+        - alert: QueryLatencyHigh
+          expr: |
+            histogram_quantile(0.95, sum(rate(ads_queries_latency_seconds_bucket[5m])) by (le, tier)) > 0.1
+          for: 3m
+          labels: { severity: warning, service: insights-query-service }
+          annotations:
+            summary: "p95 query latency > 100 ms on tier {{ $labels.tier }}"
+
+        - alert: RedisCacheHitRateLow
+          expr: |
+            sum(rate(ads_queries_cache_hits_total[5m])) /
+            (sum(rate(ads_queries_cache_hits_total[5m])) + sum(rate(ads_queries_cache_misses_total[5m]))) < 0.80
+          for: 10m
+          labels: { severity: warning, service: insights-query-service }
+          annotations:
+            summary: "Redis cache hit rate < 80%"
+            description: "Check Redis memory, TTL config, and stream engine freshness."
+
+        - alert: InsightsQueryServiceDown
+          expr: up{job="insights-query-service"} == 0
+          for: 1m
+          labels: { severity: critical }
+          annotations: { summary: "Insights query service is DOWN" }
+
+    - name: jvm
+      rules:
+        - alert: JvmHeapCritical
+          expr: jvm_memory_used_bytes{area="heap"} / jvm_memory_max_bytes{area="heap"} > 0.90
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "JVM heap > 90% on {{ $labels.job }}"
+            description: "OOM imminent. Increase -Xmx or investigate memory leak."
+
+        - alert: JvmHeapWarning
+          expr: jvm_memory_used_bytes{area="heap"} / jvm_memory_max_bytes{area="heap"} > 0.75
+          for: 5m
+          labels: { severity: warning }
+          annotations: { summary: "JVM heap > 75% on {{ $labels.job }}" }
+
+    - name: flink
+      rules:
+        - alert: FlinkCheckpointFailed
+          expr: flink_jobmanager_job_numberOfFailedCheckpoints > 3
+          for: 2m
+          labels: { severity: critical, service: stream-processing-engine }
+          annotations:
+            summary: "Flink job has > 3 consecutive checkpoint failures"
+            description: "State recovery after restart may fail. Check S3 checkpoint storage."
+
+        - alert: FlinkBackpressureHigh
+          expr: flink_taskmanager_job_task_isBackPressured > 0.5
+          for: 5m
+          labels: { severity: warning, service: stream-processing-engine }
+          annotations:
+            summary: "Flink operator backpressure > 50%"
+            description: "Consumer throughput may be falling behind. Consider increasing parallelism."
+
+        - alert: FlinkJobDown
+          expr: up{job="stream-processing-engine-flink"} == 0
+          for: 1m
+          labels: { severity: critical, service: stream-processing-engine }
+          annotations: { summary: "Flink Prometheus reporter is unreachable" }
+
+    - name: dlq
+      rules:
+        - alert: DlqLagGrowing
+          expr: kafka_consumer_group_lag{topic=~".*ad-interaction-failed.*"} > 10000
+          for: 15m
+          labels: { severity: warning, service: ingestion-service }
+          annotations:
+            summary: "DLQ consumer-group lag > 10 k events"
+            description: "Use POST /api/v1/admin/dlq/replay to triage events."
+
+        - alert: DlqReplayFailed
+          expr: increase(ads_dlq_replay_failed_total[10m]) > 100
+          for: 5m
+          labels: { severity: warning, service: ingestion-service }
+          annotations: { summary: "DLQ replay failed for > 100 events in the last 10 minutes" }

@@ -1,0 +1,44 @@
+# =====================================================================
+# LOCAL profile (application-local.yml)
+# Laptop development via Docker Compose. Points to local containers.
+# Security relaxed for fast iteration. NEVER used in shared clusters.
+# Activate: mvn spring-boot:run -Dspring-boot.run.profiles=local
+# =====================================================================
+spring:
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      acks: all
+      retries: 1
+
+platform:
+  kafka:
+    partitions: 1
+  rate-limit:
+    tps: -1                  # unlimited locally
+  security:
+    paseto:
+      enabled: false         # auth disabled for local convenience
+  # Confluent Schema Registry — local Docker Compose container.
+  # Set to your Confluent Cloud SR URL for cloud deployments.
+  schema-registry:
+    url: http://localhost:8081
+
+redis:
+  host: localhost
+  port: 6379
+
+pinot:
+  broker: localhost:8099
+  controller: localhost:9000
+
+logging:
+  level:
+    root: DEBUG
+    com.java: DEBUG
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+

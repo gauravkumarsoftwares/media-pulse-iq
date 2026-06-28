@@ -1,0 +1,30 @@
+{
+  "schemaName": "shopping_events",
+  "dimensionFieldSpecs": [
+    { "name": "event_id",      "dataType": "STRING",  "singleValueField": true },
+    { "name": "tenant_id",     "dataType": "STRING",  "singleValueField": true },
+    { "name": "user_id",       "dataType": "STRING",  "singleValueField": true },
+    { "name": "session_id",    "dataType": "STRING",  "singleValueField": true },
+    { "name": "campaign_id",   "dataType": "STRING",  "singleValueField": true },
+    { "name": "ad_id",         "dataType": "STRING",  "singleValueField": true },
+    { "name": "placement_id",  "dataType": "STRING",  "singleValueField": true },
+    { "name": "event_type",    "dataType": "STRING",  "singleValueField": true },
+    { "name": "geo_country",   "dataType": "STRING",  "singleValueField": true },
+    { "name": "geo_region",    "dataType": "STRING",  "singleValueField": true },
+    { "name": "device_type",   "dataType": "STRING",  "singleValueField": true },
+    { "name": "os",            "dataType": "STRING",  "singleValueField": true }
+  ],
+  "metricFieldSpecs": [
+    { "name": "cost",     "dataType": "DOUBLE" },
+    { "name": "quantity", "dataType": "INT"    }
+  ],
+  "dateTimeFieldSpecs": [
+    {
+      "name":        "event_timestamp_ms",
+      "dataType":    "LONG",
+      "format":      "1:MILLISECONDS:EPOCH",
+      "granularity": "1:MINUTES"
+    }
+  ]
+}
+

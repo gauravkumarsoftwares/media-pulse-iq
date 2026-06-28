@@ -321,7 +321,7 @@ PASETO configuration is shared across all services via `shared-security` auto-co
 | `platform.security.paseto.local-key` | — | `${PASETO_LOCAL_KEY}` | 32-byte symmetric key (K8s Secret) |
 | `platform.security.paseto.token-header` | `Authorization` | `X-Internal-Token` | Header carrying the token |
 | `platform.security.paseto.issuer` | — | `edge` | Expected `iss` claim |
-| `platform.security.paseto.audience` | — | `event-analysis` | Expected `aud` claim |
+| `platform.security.paseto.audience` | — | `media-pulse-iq` | Expected `aud` claim |
 | `platform.security.paseto.clock-skew-seconds` | `60` | `30` | Allowed clock skew |
 
 ### Rate Limiting

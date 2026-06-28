@@ -1,0 +1,41 @@
+# =====================================================================
+# DEV profile (application-dev.yml)
+# Shared integration / feature-testing cluster. Verbose logging,
+# security enabled, modest partition counts. Secrets via K8s Secret.
+# =====================================================================
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka-dev:9092}
+    producer:
+      acks: all
+      retries: 3
+
+platform:
+  kafka:
+    partitions: 6
+  rate-limit:
+    tps: 1000
+  security:
+    paseto:
+      enabled: true
+      # Public key injected at runtime via K8s Secret (NOT committed)
+      public-key: ${PASETO_PUBLIC_KEY:}
+
+redis:
+  host: ${REDIS_HOST:redis-dev}
+  port: ${REDIS_PORT:6379}
+
+pinot:
+  broker: ${PINOT_BROKER:pinot-dev:8099}
+  controller: ${PINOT_CONTROLLER:pinot-dev:9000}
+
+logging:
+  level:
+    root: DEBUG
+    com.java: DEBUG
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+

@@ -1,0 +1,141 @@
+# =====================================================================
+# Local full-stack environment — Real-Time Streaming Insight Platform.
+# Usage:  cd deploy && docker compose up --build
+# Includes: Kafka, Redis, Pinot (local), Prometheus, Grafana + all services.
+# OB-1: OpenTelemetry Collector (Jaeger UI for distributed traces)
+# OB-5: Grafana Loki + Fluent Bit for structured log aggregation
+# =====================================================================
+version: "3.9"
+
+services:
+  # ---- Infrastructure -----------------------------------------------
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    depends_on: [zookeeper]
+    ports: ["9092:9092"]
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    command: redis-server --save "" --appendonly no
+
+  # Kafka metrics exporter for Prometheus (consumer-group lag, broker metrics)
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    depends_on: [kafka]
+    ports: ["9308:9308"]
+    command: --kafka.server=kafka:9092
+
+  # ---- Observability — Distributed Tracing (OB-1) -------------------
+  # All-in-one Jaeger: receives OTLP spans from Spring Boot services and
+  # renders the trace UI at http://localhost:16686.
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4318:4318"     # OTLP HTTP receiver (used by Spring Boot OTLP exporter)
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+
+  # ---- Observability — Structured Log Aggregation (OB-5) ------------
+  # Grafana Loki: log aggregation backend.
+  loki:
+    image: grafana/loki:3.0.0
+    ports: ["3100:3100"]
+    command: -config.file=/etc/loki/local-config.yaml
+
+  # Fluent Bit: tails Docker container logs and ships them to Loki.
+  # In Kubernetes, replace with the DaemonSet in deploy/k8s/base/fluent-bit-daemonset.yaml.
+  fluent-bit:
+    image: fluent/fluent-bit:3.1
+    depends_on: [loki]
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+    environment:
+      LOKI_URL: "http://loki:3100/loki/api/v1/push"
+
+  # ---- Microservices ------------------------------------------------
+  ingestion-service:
+    build:
+      context: ..
+      dockerfile: ingestion-service/Dockerfile
+    ports:
+      - "8081:8080"   # API
+      - "9091:9090"   # Actuator / Prometheus metrics
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      KAFKA_ENV: local
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on: [kafka, jaeger]
+
+  stream-processing-engine:
+    build:
+      context: ..
+      dockerfile: stream-processing-engine/Dockerfile
+    ports:
+      - "8082:8082"   # API
+      - "9092:9090"   # Actuator / Prometheus metrics
+      - "9249:9249"   # Flink Prometheus reporter (OB-3)
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      KAFKA_ENV: local
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REDIS_HOST: redis
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on: [kafka, redis, jaeger]
+
+  insights-query-service:
+    build:
+      context: ..
+      dockerfile: insights-query-service/Dockerfile
+    ports:
+      - "8083:8083"   # API
+      - "9093:9090"   # Actuator / Prometheus metrics
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      KAFKA_ENV: local
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REDIS_HOST: redis
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+    depends_on: [kafka, redis, jaeger]
+
+  # ---- Observability ------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    ports: ["9090:9090"]
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"
+    depends_on: [ingestion-service, stream-processing-engine, insights-query-service]
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    ports: ["3000:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/ad-analytics-overview.json
+      GF_FEATURE_TOGGLES_ENABLE: publicDashboards
+    volumes:
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+    depends_on: [prometheus, loki]

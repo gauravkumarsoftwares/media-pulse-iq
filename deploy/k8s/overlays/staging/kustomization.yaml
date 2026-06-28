@@ -1,0 +1,24 @@
+# =====================================================================
+# STAGING overlay - prod-like sizing in an isolated namespace.
+# =====================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: staging
+
+resources:
+  - ../../base
+
+configMapGenerator:
+  - name: app-config
+    envs:
+      - configmap.env
+
+replicas:
+  - name: ingestion-service
+    count: 5
+  - name: stream-processing-engine
+    count: 3
+  - name: insights-query-service
+    count: 3
+

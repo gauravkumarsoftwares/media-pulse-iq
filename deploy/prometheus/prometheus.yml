@@ -1,0 +1,86 @@
+# ============================================================
+# Prometheus scrape configuration — Ad Analytics Platform
+# ============================================================
+#
+# In production, Spring Boot services expose metrics at
+#   http://<service>:9090/actuator/prometheus
+# (management.server.port=9090, separate from the API port)
+#
+# This file is used by the local docker-compose Prometheus instance.
+# For Kubernetes, use the PodMonitor / ServiceMonitor CRDs (Prometheus Operator).
+# ============================================================
+
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: local
+    platform: ad-analytics
+
+rule_files:
+  - "alert-rules.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []   # Set to alertmanager:9093 when AlertManager is running
+
+scrape_configs:
+
+  # ---- Ad Analytics Platform microservices ----
+  - job_name: ingestion-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["ingestion-service:9090"]
+    relabel_configs:
+      - target_label: service
+        replacement: ingestion-service
+
+  - job_name: stream-processing-engine
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["stream-processing-engine:9090"]
+    relabel_configs:
+      - target_label: service
+        replacement: stream-processing-engine
+
+  - job_name: insights-query-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["insights-query-service:9090"]
+    relabel_configs:
+      - target_label: service
+        replacement: insights-query-service
+
+  # ---- Infrastructure ----
+  - job_name: kafka
+    static_configs:
+      - targets: ["kafka-exporter:9308"]
+
+  - job_name: redis
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+
+  - job_name: pinot
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["pinot-controller:9000"]
+
+  # ---- OB-3: Flink native metrics (checkpoint, backpressure, watermark lag) ----
+  # PrometheusReporter runs embedded in stream-processing-engine when flink.enabled=true.
+  # Port 9249 is the standard Flink Prometheus reporter port.
+  - job_name: stream-processing-engine-flink
+    static_configs:
+      - targets: ["stream-processing-engine:9249"]
+    relabel_configs:
+      - target_label: service
+        replacement: stream-processing-engine-flink
+
+  # ---- OB-5: Loki log aggregation (Grafana datasource) ----
+  # Loki itself is not scraped by Prometheus; it exposes its own metrics on :3100.
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]
+    relabel_configs:
+      - target_label: service
+        replacement: loki

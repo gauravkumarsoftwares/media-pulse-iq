@@ -29,7 +29,7 @@ platform:
       mode: local
       local-key: ${PASETO_LOCAL_KEY:}
       issuer: ${PASETO_ISSUER:edge}
-      audience: ${PASETO_AUDIENCE:event-analysis}
+      audience: ${PASETO_AUDIENCE:media-pulse-iq}
       token-header: ${PASETO_TOKEN_HEADER:X-Internal-Token}
       clock-skew-seconds: 30
 

@@ -1,0 +1,64 @@
+# =====================================================================
+# Base manifest: stream-processing-engine (Stream Path)
+# Scaled by KEDA on Kafka consumer lag (see ScaledObject below).
+# =====================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stream-processing-engine
+  labels: { app: stream-processing-engine }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: stream-processing-engine }
+  template:
+    metadata:
+      labels: { app: stream-processing-engine }
+    spec:
+      containers:
+        - name: stream-processing-engine
+          image: registry.io/media-pulse-iq/stream-processing-engine:latest
+          ports:
+            - { containerPort: 8082 }   # app
+            - { containerPort: 9090 }   # management/actuator (not exposed by Service)
+          envFrom:
+            - configMapRef: { name: app-config }
+            - secretRef: { name: app-secrets }   # required: PASETO key + credentials (fail-closed)
+          resources:
+            requests: { cpu: "1", memory: "1Gi" }
+            limits: { cpu: "2", memory: "2Gi" }
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: 9090 }
+            initialDelaySeconds: 20
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: 9090 }
+            initialDelaySeconds: 40
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stream-processing-engine
+spec:
+  selector: { app: stream-processing-engine }
+  ports:
+    - port: 80
+      targetPort: 8082
+---
+# KEDA autoscaler: scale on Kafka consumer lag (architecture 7.1).
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: stream-engine-scaler
+spec:
+  scaleTargetRef:
+    name: stream-processing-engine
+  minReplicaCount: 1
+  maxReplicaCount: 50
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: group_stream_engine
+        topic: events.shopping.raw
+        lagThreshold: "500000"
+

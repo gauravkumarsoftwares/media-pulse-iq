@@ -217,7 +217,7 @@ Conceptual decoded payload:
   "scopes":            ["read:ads"],
   "allowed_campaigns": ["cmp_spring_99a", "cmp_singles_day"],
   "iss":               "auth.platform.internal",
-  "aud":               "event-analysis",
+  "aud":               "media-pulse-iq",
   "iat":               "2026-06-28T10:00:00Z",
   "nbf":               "2026-06-28T10:00:00Z",
   "exp":               "2026-06-28T10:15:00Z",
@@ -268,7 +268,7 @@ Decoded message (before the 64-byte Ed25519 signature):
   "scopes":            ["read:ads"],
   "allowed_campaigns": ["cmp_spring_99a", "cmp_singles_day"],
   "iss":               "auth.platform.internal",
-  "aud":               "event-analysis",
+  "aud":               "media-pulse-iq",
   "iat":               "2026-06-28T10:00:00Z",
   "nbf":               "2026-06-28T10:00:00Z",
   "exp":               "2026-06-28T10:15:00Z",
@@ -300,7 +300,7 @@ When decrypted (visible only to services holding `PASETO_LOCAL_KEY`):
   "scopes":            ["read:ads"],
   "allowed_campaigns": ["cmp_spring_99a", "cmp_singles_day"],
   "iss":               "edge",
-  "aud":               "event-analysis",
+  "aud":               "media-pulse-iq",
   "iat":               "2026-06-28T10:00:00Z",
   "nbf":               "2026-06-28T10:00:00Z",
   "exp":               "2026-06-28T10:01:00Z"
@@ -329,7 +329,7 @@ gateway token-exchange step. Used in production by the Kong plugin and directly 
 PasetoV4LocalIssuer issuer = new PasetoV4LocalIssuer(
         sharedKey,           // 32-byte hex/base64 — from PASETO_LOCAL_KEY K8s Secret
         "edge",              // iss
-        "event-analysis");   // aud
+        "media-pulse-iq");   // aud
 
 String internalToken = issuer.issue(
         "walmart_us",                              // verified tenant_id
@@ -740,7 +740,7 @@ platform:
       mode: local                       # Option C: verify internal v4.local token
       local-key: ${PASETO_LOCAL_KEY:}   # 32-byte key (hex/base64), from K8s Secret
       issuer: ${PASETO_ISSUER:edge}
-      audience: ${PASETO_AUDIENCE:event-analysis}
+      audience: ${PASETO_AUDIENCE:media-pulse-iq}
       token-header: ${PASETO_TOKEN_HEADER:X-Internal-Token}
       clock-skew-seconds: 30
 ```
@@ -909,7 +909,7 @@ a one-method scope declaration.
 
 ```java
 // At the edge, after verifying the external v4.public token:
-PasetoV4LocalIssuer issuer = new PasetoV4LocalIssuer(SHARED_KEY, "edge", "event-analysis");
+PasetoV4LocalIssuer issuer = new PasetoV4LocalIssuer(SHARED_KEY, "edge", "media-pulse-iq");
 String internal = issuer.issue(
         verified.tenantId(),
         verified.scopes(),

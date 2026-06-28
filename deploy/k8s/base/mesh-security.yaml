@@ -1,0 +1,61 @@
+# =====================================================================
+# Mesh & network security (OWASP A02/A05/A10).
+#
+#   1. Istio PeerAuthentication  -> STRICT mTLS for all platform pods, so
+#      service-to-service traffic is mutually authenticated + encrypted.
+#   2. NetworkPolicy             -> default-deny ingress; only the API gateway
+#      may reach the app ports, and only the monitoring namespace may scrape
+#      the management/actuator port (9090). Datastore egress is allow-listed.
+#
+# Applied to whichever namespace the overlay targets (dev/staging/prod).
+# Requires Istio (PeerAuthentication CRD) and a CNI that enforces
+# NetworkPolicy (Calico/Cilium).
+# =====================================================================
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: platform-strict-mtls
+  labels:
+    app.kubernetes.io/part-of: media-pulse-iq
+spec:
+  # Namespace-wide (no selector) — every workload must use mTLS.
+  mtls:
+    mode: STRICT
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: platform-default-deny-ingress
+  labels:
+    app.kubernetes.io/part-of: media-pulse-iq
+spec:
+  podSelector: {}          # all pods in the namespace
+  policyTypes: [Ingress]
+  ingress: []              # deny all ingress unless explicitly allowed below
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: platform-allow-gateway-and-monitoring
+  labels:
+    app.kubernetes.io/part-of: media-pulse-iq
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: media-pulse-iq
+  policyTypes: [Ingress]
+  ingress:
+    # App traffic only from the API gateway namespace.
+    - from:
+        - namespaceSelector:
+            matchLabels: { app.kubernetes.io/part-of: api-gateway }
+      ports:
+        - { protocol: TCP, port: 8080 }   # ingestion
+        - { protocol: TCP, port: 8082 }   # stream engine
+        - { protocol: TCP, port: 8083 }   # insights
+    # Actuator/metrics (9090) only from the monitoring namespace (Prometheus).
+    - from:
+        - namespaceSelector:
+            matchLabels: { app.kubernetes.io/part-of: monitoring }
+      ports:
+        - { protocol: TCP, port: 9090 }

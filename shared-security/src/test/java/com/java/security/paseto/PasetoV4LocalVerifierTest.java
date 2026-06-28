@@ -28,12 +28,12 @@ class PasetoV4LocalVerifierTest {
     @Test
     void verifiesIssuedToken() {
         String key = newKeyBase64();
-        PasetoV4LocalIssuer issuer = new PasetoV4LocalIssuer(key, "edge", "event-analysis");
+        PasetoV4LocalIssuer issuer = new PasetoV4LocalIssuer(key, "edge", "media-pulse-iq");
         String token = issuer.issue("walmart_us", List.of("read:ads"),
                 List.of("cmp_1"), Duration.ofSeconds(60));
 
         PasetoV4LocalVerifier verifier =
-                new PasetoV4LocalVerifier(key, "edge", "event-analysis", Duration.ofSeconds(0));
+                new PasetoV4LocalVerifier(key, "edge", "media-pulse-iq", Duration.ofSeconds(0));
         PasetoClaims claims = verifier.verify(token);
 
         assertEquals("walmart_us", claims.tenantId());

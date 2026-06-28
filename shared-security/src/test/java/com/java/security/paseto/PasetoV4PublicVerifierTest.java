@@ -31,11 +31,11 @@ class PasetoV4PublicVerifierTest {
         KeyPair kp = generateEd25519();
         String json = """
                 {"tenant_id":"walmart_us","scopes":["read:ads"],
-                 "allowed_campaigns":["cmp_1"],"iss":"auth","aud":"event-analysis",
+                 "allowed_campaigns":["cmp_1"],"iss":"auth","aud":"media-pulse-iq",
                  "exp":"%s"}""".formatted(Instant.now().plusSeconds(300));
 
         String token = mint(json, kp);
-        PasetoV4PublicVerifier verifier = verifier(kp, "auth", "event-analysis");
+        PasetoV4PublicVerifier verifier = verifier(kp, "auth", "media-pulse-iq");
 
         PasetoClaims claims = verifier.verify(token);
         assertEquals("walmart_us", claims.tenantId());

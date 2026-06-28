@@ -1,0 +1,349 @@
+# ============================================================
+# PromQL Alerting Rules — Ad Analytics Platform
+# ============================================================
+# Severity levels: critical (page immediately) | warning (ticket/Slack)
+# All thresholds are tuned for a 100 k event/s production ingestion target.
+# Adjust `for` durations and thresholds via ConfigMap in your K8s overlay.
+# ============================================================
+
+groups:
+
+  # ------------------------------------------------------------------
+  # 1. Ingestion Write Path
+  # ------------------------------------------------------------------
+  - name: ingestion
+    rules:
+
+      - alert: HighDlqRate
+        expr: |
+          sum(rate(ads_events_dlq_total[5m])) by (tenantId) > 100
+        for: 2m
+        labels:
+          severity: warning
+          service: ingestion-service
+        annotations:
+          summary: "High DLQ rate for tenant {{ $labels.tenantId }}"
+          description: >
+            More than 100 events/s are being routed to the Dead Letter Queue for
+            tenant {{ $labels.tenantId }}. This indicates schema validation failures
+            or rejected events. Check ingestion logs and producer schemas.
+
+      - alert: CriticalDlqRate
+        expr: |
+          sum(rate(ads_events_dlq_total[5m])) by (tenantId) > 1000
+        for: 1m
+        labels:
+          severity: critical
+          service: ingestion-service
+        annotations:
+          summary: "Critical DLQ rate — possible data loss for {{ $labels.tenantId }}"
+          description: >
+            DLQ rate exceeds 1000 events/s for tenant {{ $labels.tenantId }}.
+            This may indicate a producer bug or a systematic schema change.
+
+      - alert: IngestLatencyHigh
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(ads_ingest_latency_seconds_bucket[5m])) by (le, tenantId)
+          ) > 0.5
+        for: 3m
+        labels:
+          severity: warning
+          service: ingestion-service
+        annotations:
+          summary: "p99 ingestion latency > 500 ms for {{ $labels.tenantId }}"
+          description: >
+            The 99th percentile ingestion latency has exceeded 500 ms for
+            tenant {{ $labels.tenantId }} for more than 3 minutes. Check Kafka
+            broker health and producer acks configuration.
+
+      - alert: IngestErrorRate
+        expr: |
+          sum(rate(http_server_requests_seconds_count{
+            job="ingestion-service", status=~"5.."
+          }[5m])) /
+          sum(rate(http_server_requests_seconds_count{
+            job="ingestion-service"
+          }[5m])) > 0.01
+        for: 2m
+        labels:
+          severity: critical
+          service: ingestion-service
+        annotations:
+          summary: "Ingestion HTTP 5xx error rate > 1%"
+          description: >
+            More than 1% of ingest requests are returning 5xx errors.
+            Check JVM heap, Kafka connectivity, and recent deployments.
+
+      - alert: IngestServiceDown
+        expr: |
+          up{job="ingestion-service"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: ingestion-service
+        annotations:
+          summary: "Ingestion service is DOWN"
+          description: "Prometheus cannot scrape ingestion-service. All writes are failing."
+
+  # ------------------------------------------------------------------
+  # 2. Stream Processing (Flink / Spring-Kafka)
+  # ------------------------------------------------------------------
+  - name: stream-processing
+    rules:
+
+      - alert: KafkaConsumerLagHigh
+        expr: |
+          kafka_consumer_group_lag{
+            consumergroup=~".*ads.stream-processing-engine.*"
+          } > 500000
+        for: 5m
+        labels:
+          severity: warning
+          service: stream-processing-engine
+        annotations:
+          summary: "Kafka consumer lag > 500 k events"
+          description: >
+            The stream-processing-engine consumer group is > 500 k events behind.
+            Consider scaling up replicas (KEDA trigger: lagThreshold: "500000").
+
+      - alert: KafkaConsumerLagCritical
+        expr: |
+          kafka_consumer_group_lag{
+            consumergroup=~".*ads.stream-processing-engine.*"
+          } > 5000000
+        for: 2m
+        labels:
+          severity: critical
+          service: stream-processing-engine
+        annotations:
+          summary: "Kafka lag > 5 M — stream processing severely behind"
+          description: >
+            Consumer lag has exceeded 5 million events. Real-time serving freshness
+            is degraded. Escalate immediately — check Flink/Kafka health.
+
+      - alert: HighDedupDropRate
+        expr: |
+          sum(rate(ads_events_dedup_dropped_total[5m])) /
+          sum(rate(ads_events_processed_total[5m])) > 0.10
+        for: 5m
+        labels:
+          severity: warning
+          service: stream-processing-engine
+        annotations:
+          summary: "Dedup drop rate > 10% — possible replay attack"
+          description: >
+            More than 10% of incoming events are being dropped as duplicates.
+            This could indicate a Kafka consumer restart replaying old offsets,
+            or a deliberate replay attack. Review event-id uniqueness enforcement.
+
+      - alert: AttributionRateDrop
+        expr: |
+          sum(rate(ads_events_attributed_total[15m])) == 0
+        for: 30m
+        labels:
+          severity: warning
+          service: stream-processing-engine
+        annotations:
+          summary: "Zero click-to-basket attributions for 30 minutes"
+          description: >
+            No CLICK_TO_BASKET conversions have been emitted for 30 minutes.
+            Either there is no user traffic or the attribution join is broken.
+
+      - alert: StreamProcessingDown
+        expr: up{job="stream-processing-engine"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: stream-processing-engine
+        annotations:
+          summary: "Stream processing engine is DOWN"
+          description: "Prometheus cannot scrape stream-processing-engine."
+
+  # ------------------------------------------------------------------
+  # 3. Insights Query Service (Read Path)
+  # ------------------------------------------------------------------
+  - name: insights-query
+    rules:
+
+      - alert: QueryLatencyHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(ads_queries_latency_seconds_bucket[5m])) by (le, tier)
+          ) > 0.1
+        for: 3m
+        labels:
+          severity: warning
+          service: insights-query-service
+        annotations:
+          summary: "p95 query latency > 100 ms on tier {{ $labels.tier }}"
+          description: >
+            The 95th-percentile query latency for the {{ $labels.tier }} tier
+            exceeds 100 ms. For Redis this should be < 1 ms; for Pinot < 10 ms.
+            Check store health and query patterns.
+
+      - alert: RedisCacheHitRateLow
+        expr: |
+          sum(rate(ads_queries_cache_hits_total[5m])) /
+          (
+            sum(rate(ads_queries_cache_hits_total[5m])) +
+            sum(rate(ads_queries_cache_misses_total[5m]))
+          ) < 0.80
+        for: 10m
+        labels:
+          severity: warning
+          service: insights-query-service
+        annotations:
+          summary: "Redis cache hit rate < 80%"
+          description: >
+            The Redis hot-cache hit rate has dropped below 80%. This increases
+            load on Pinot and query latency. Check Redis eviction policy (TTL),
+            data freshness from the stream engine, and Redis memory capacity.
+
+      - alert: InsightsQueryServiceDown
+        expr: up{job="insights-query-service"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: insights-query-service
+        annotations:
+          summary: "Insights query service is DOWN"
+          description: "Prometheus cannot scrape insights-query-service. Dashboard reads are failing."
+
+  # ------------------------------------------------------------------
+  # 4. JVM / Infrastructure
+  # ------------------------------------------------------------------
+  - name: jvm
+    rules:
+
+      - alert: JvmHeapCritical
+        expr: |
+          jvm_memory_used_bytes{area="heap"} /
+          jvm_memory_max_bytes{area="heap"} > 0.90
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "JVM heap > 90% on {{ $labels.job }}"
+          description: >
+            JVM heap usage has exceeded 90% on service {{ $labels.job }}.
+            An OutOfMemoryError is imminent. Check for memory leaks or increase
+            heap with -Xmx.
+
+      - alert: JvmHeapWarning
+        expr: |
+          jvm_memory_used_bytes{area="heap"} /
+          jvm_memory_max_bytes{area="heap"} > 0.75
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "JVM heap > 75% on {{ $labels.job }}"
+          description: "JVM heap has been above 75% for 5 minutes on {{ $labels.job }}."
+
+      - alert: KafkaBrokerDown
+        expr: |
+          kafka_brokers < 3
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka cluster has fewer than 3 brokers"
+          description: >
+            The Kafka cluster has {{ $value }} live brokers, which is below the
+            expected 3. Replication may be degraded and data loss is possible.
+
+  # ------------------------------------------------------------------
+  # 5. Flink Native Metrics (OB-3)
+  # ------------------------------------------------------------------
+  - name: flink
+    rules:
+
+      - alert: FlinkCheckpointFailed
+        expr: |
+          flink_jobmanager_job_numberOfFailedCheckpoints > 3
+        for: 2m
+        labels:
+          severity: critical
+          service: stream-processing-engine
+        annotations:
+          summary: "Flink job has > 3 consecutive checkpoint failures"
+          description: >
+            More than 3 Flink checkpoints have failed. State recovery after a job
+            restart may fail, causing data loss or duplicate processing.
+            Check S3 checkpoint storage and network connectivity.
+
+      - alert: FlinkBackpressureHigh
+        expr: |
+          flink_taskmanager_job_task_isBackPressured > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          service: stream-processing-engine
+        annotations:
+          summary: "Flink operator backpressure > 50% for 5 minutes"
+          description: >
+            A Flink operator is backpressured (ratio={{ $value }}) for more than
+            5 minutes. Consumer throughput may be falling behind producer rate.
+            Consider increasing parallelism or optimising the operator.
+
+      - alert: FlinkWatermarkLagHigh
+        expr: |
+          (time() * 1000) - flink_taskmanager_job_task_operator_currentInputWatermark > 300000
+        for: 5m
+        labels:
+          severity: warning
+          service: stream-processing-engine
+        annotations:
+          summary: "Flink watermark lag > 5 minutes"
+          description: >
+            The Flink watermark is more than 5 minutes behind wall-clock time.
+            Late events are being held beyond the bounded out-of-orderness tolerance,
+            causing attribution window accuracy to degrade.
+
+      - alert: FlinkJobDown
+        expr: |
+          up{job="stream-processing-engine-flink"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: stream-processing-engine
+        annotations:
+          summary: "Flink Prometheus reporter is unreachable"
+          description: >
+            Prometheus cannot scrape Flink metrics from stream-processing-engine:9249.
+            Either the Flink job is not running or the reporter is misconfigured.
+
+  # ------------------------------------------------------------------
+  # 6. DLQ Lag (OB-4)
+  # ------------------------------------------------------------------
+  - name: dlq
+    rules:
+
+      - alert: DlqLagGrowing
+        expr: |
+          kafka_consumer_group_lag{topic=~".*ad-interaction-failed.*"} > 10000
+        for: 15m
+        labels:
+          severity: warning
+          service: ingestion-service
+        annotations:
+          summary: "DLQ consumer-group lag > 10 k events for 15 minutes"
+          description: >
+            The Dead Letter Queue topic {{ $labels.topic }} has more than 10 000
+            unconsumed events. Use POST /api/v1/admin/dlq/replay to triage and
+            re-publish events. DLQ reason breakdown is in the stats endpoint.
+
+      - alert: DlqReplayFailed
+        expr: |
+          increase(ads_dlq_replay_failed_total[10m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: ingestion-service
+        annotations:
+          summary: "DLQ replay failed for > 100 events in the last 10 minutes"
+          description: >
+            More than 100 DLQ re-publish attempts have failed in the last 10 minutes.
+            Check Kafka broker health and DLQ replay logs.
+

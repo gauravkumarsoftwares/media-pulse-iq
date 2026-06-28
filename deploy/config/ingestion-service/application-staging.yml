@@ -1,0 +1,46 @@
+# =====================================================================
+# STAGING profile (application-staging.yml)
+# Pre-production, prod-like environment for performance & UAT testing.
+# Production-grade tuning with isolated infrastructure.
+# =====================================================================
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka-staging:9092}
+    producer:
+      acks: all
+      retries: 5
+
+platform:
+  kafka:
+    partitions: 64
+  rate-limit:
+    tps: 5000
+  security:
+    # Option C (token-exchange): verify the gateway-minted internal v4.local token.
+    paseto:
+      enabled: true
+      mode: local
+      local-key: ${PASETO_LOCAL_KEY:}
+      issuer: ${PASETO_ISSUER:edge}
+      audience: ${PASETO_AUDIENCE:media-pulse-iq}
+      token-header: ${PASETO_TOKEN_HEADER:X-Internal-Token}
+      clock-skew-seconds: 30
+
+redis:
+  host: ${REDIS_HOST:redis-staging}
+  port: ${REDIS_PORT:6379}
+
+pinot:
+  broker: ${PINOT_BROKER:pinot-staging:8099}
+  controller: ${PINOT_CONTROLLER:pinot-staging:9000}
+
+logging:
+  level:
+    root: INFO
+    com.java: INFO
+
+management:
+  tracing:
+    sampling:
+      probability: 0.5
+

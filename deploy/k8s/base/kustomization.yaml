@@ -1,0 +1,17 @@
+# =====================================================================
+# Kustomize BASE - environment-agnostic resources
+# Overlays (dev/staging/prod) reference this base and patch env-specifics.
+# =====================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ingestion-service.yaml
+  - stream-processing-engine.yaml
+  - insights-query-service.yaml
+  - mesh-security.yaml
+
+# Common labels applied to every resource
+commonLabels:
+  app.kubernetes.io/part-of: media-pulse-iq
+

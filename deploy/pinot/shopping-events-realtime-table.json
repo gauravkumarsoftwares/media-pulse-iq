@@ -1,0 +1,79 @@
+{
+  "tableName": "shopping_events",
+  "tableType": "REALTIME",
+
+  "segmentsConfig": {
+    "timeColumnName": "event_timestamp_ms",
+    "timeType": "MILLISECONDS",
+    "retentionTimeUnit": "DAYS",
+    "retentionTimeValue": "30",
+    "schemaName": "shopping_events",
+    "replication": "2",
+    "completionConfig": {
+      "completionMode": "DOWNLOAD"
+    }
+  },
+
+  "tableIndexConfig": {
+    "loadMode": "MMAP",
+
+    "streamConfigs": {
+      "streamType": "kafka",
+      "stream.kafka.consumer.type": "lowlevel",
+      "stream.kafka.topic.name": "${KAFKA_ENV}.internal.event.ads.attribution.ad-interaction-enriched-by-campaign",
+      "stream.kafka.broker.list": "${KAFKA_BOOTSTRAP_SERVERS}",
+      "stream.kafka.consumer.factory.class.name": "org.apache.pinot.plugin.stream.kafka20.KafkaConsumerFactory",
+      "stream.kafka.decoder.class.name": "org.apache.pinot.plugin.inputformat.json.JSONMessageDecoder",
+      "realtime.segment.flush.threshold.rows": "500000",
+      "realtime.segment.flush.threshold.time": "3600000",
+      "stream.kafka.consumer.prop.auto.offset.reset": "smallest"
+    },
+
+    "invertedIndexColumns": ["tenant_id", "campaign_id", "event_type"],
+    "noDictionaryColumns":  ["event_timestamp_ms", "cost"],
+    "rangeIndexColumns":    ["event_timestamp_ms"],
+
+    "starTreeIndexConfigs": [
+      {
+        "dimensionsSplitOrder": ["tenant_id", "campaign_id", "event_type", "placement_id"],
+        "skipStarNodeCreationForDimensions": [],
+        "functionColumnPairs": [
+          "COUNT__event_id",
+          "SUM__cost"
+        ],
+        "maxLeafRecords": 10000
+      },
+      {
+        "dimensionsSplitOrder": ["tenant_id", "campaign_id", "geo_country", "device_type"],
+        "skipStarNodeCreationForDimensions": [],
+        "functionColumnPairs": [
+          "COUNT__event_id"
+        ],
+        "maxLeafRecords": 10000
+      }
+    ],
+
+    "aggregateMetrics": true
+  },
+
+  "tenants": {
+    "broker": "DefaultTenant",
+    "server": "DefaultTenant",
+    "tagOverrideConfig": {}
+  },
+
+  "routing": {
+    "instanceSelectorType": "strictReplicaGroup"
+  },
+
+  "query": {
+    "timeoutMs": 10000
+  },
+
+  "metadata": {
+    "customConfigs": {
+      "description": "Real-time ad interaction events table. Ingests from the DDD-named enriched Kafka topic. Star-Tree index pre-aggregates clicks/impressions/CTB by tenant+campaign+eventType in <15ms."
+    }
+  }
+}
+

@@ -1,0 +1,49 @@
+# =====================================================================
+# BASE / DEFAULT configuration (application.yml)
+# Shared, safe defaults for ALL environments. Profile-specific files
+# (application-<profile>.yml) override these values.
+# The active profile is selected via SPRING_PROFILES_ACTIVE env var.
+# =====================================================================
+spring:
+  application:
+    name: ingestion-service
+  profiles:
+    # Falls back to 'local' if SPRING_PROFILES_ACTIVE is not provided.
+    default: local
+
+server:
+  port: 8080
+
+# ---- Platform domain defaults (env-agnostic business rules) ----
+platform:
+  attribution:
+    window-hours: 24          # Click -> basket attribution window
+  dedup:
+    ttl-minutes: 60           # Deduplication state TTL
+  kafka:
+    # Logical environment prefix — drives DDD topic/consumer-group names.
+    # Override via KAFKA_ENV env-var: local | dev | staging | prod
+    env: ${KAFKA_ENV:local}
+    topic:
+      # {env}.shared.event.ads.clickstream.ad-interaction-received-by-tenant-session
+      raw: "${platform.kafka.env}.shared.event.ads.clickstream.ad-interaction-received-by-tenant-session"
+      # {env}.internal.event.ads.clickstream.ad-interaction-failed-by-tenant-id
+      dlq: "${platform.kafka.env}.internal.event.ads.clickstream.ad-interaction-failed-by-tenant-id"
+    consumer-group:
+      stream-engine: "${platform.kafka.env}.ads.stream-processing-engine"
+      insights-serving: "${platform.kafka.env}.ads.insights-query-service"
+
+# ---- Actuator: health probes + Prometheus metrics ----
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  tracing:
+    sampling:
+      probability: 1.0
+

@@ -1,0 +1,64 @@
+# =====================================================================
+# Base manifest: ingestion-service (Write Path)
+# Env is injected from the 'app-config' ConfigMap (per overlay) and the
+# 'app-secrets' Secret (credentials; managed by External Secrets Operator).
+# =====================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingestion-service
+  labels: { app: ingestion-service }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: ingestion-service }
+  template:
+    metadata:
+      labels: { app: ingestion-service }
+    spec:
+      containers:
+        - name: ingestion-service
+          image: registry.io/media-pulse-iq/ingestion-service:latest
+          ports:
+            - { containerPort: 8080 }   # app
+            - { containerPort: 9090 }   # management/actuator (not exposed by Service)
+          envFrom:
+            - configMapRef: { name: app-config }
+            - secretRef: { name: app-secrets }   # required: PASETO key + credentials (fail-closed)
+          resources:
+            requests: { cpu: "500m", memory: "512Mi" }
+            limits: { cpu: "1", memory: "1Gi" }
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: 9090 }
+            initialDelaySeconds: 15
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: 9090 }
+            initialDelaySeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingestion-service
+spec:
+  selector: { app: ingestion-service }
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ingestion-service-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ingestion-service
+  minReplicas: 1
+  maxReplicas: 300
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 75 }
+

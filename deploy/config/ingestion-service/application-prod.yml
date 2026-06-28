@@ -1,0 +1,53 @@
+# =====================================================================
+# PROD profile (application-prod.yml)
+# Live customer traffic. Multi-AZ HA, TLS broker, strict security &
+# per-tenant quotas, minimal logging, low trace sampling for cost.
+# ALL credentials injected at runtime via K8s Secret / AWS Secrets Mgr.
+# =====================================================================
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka-prod-msk:9094}
+    producer:
+      acks: all
+      retries: 10
+    properties:
+      # TLS to MSK brokers in production
+      security.protocol: SSL
+
+platform:
+  kafka:
+    partitions: 128
+  rate-limit:
+    tps: -1                  # enforced per-tenant tier at the gateway
+    per-tenant-tiers: true
+  security:
+    # Option C (token-exchange): the edge verifies the external v4.public token
+    # and re-mints a short-lived internal v4.local token verified here.
+    paseto:
+      enabled: true
+      mode: local
+      local-key: ${PASETO_LOCAL_KEY:}      # 32-byte shared key, from External Secrets / Vault
+      issuer: ${PASETO_ISSUER:edge}
+      audience: ${PASETO_AUDIENCE:media-pulse-iq}
+      token-header: ${PASETO_TOKEN_HEADER:X-Internal-Token}
+      clock-skew-seconds: 30
+
+redis:
+  host: ${REDIS_HOST:redis-prod.cache}
+  port: ${REDIS_PORT:6379}
+  ssl: true
+
+pinot:
+  broker: ${PINOT_BROKER:pinot-prod:8099}
+  controller: ${PINOT_CONTROLLER:pinot-prod:9000}
+
+logging:
+  level:
+    root: WARN
+    com.java: INFO
+
+management:
+  tracing:
+    sampling:
+      probability: 0.1
+

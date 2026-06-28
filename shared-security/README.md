@@ -131,7 +131,7 @@ Verifies externally-signed `v4.public` tokens (used when `mode=public`).
 PasetoVerifier verifier = new PasetoV4PublicVerifier(
     publicKeyBase64,    // X.509 DER encoded Ed25519 public key (base64)
     "auth.platform.internal",  // expected iss (null = not enforced)
-    "event-analysis",          // expected aud (null = not enforced)
+    "media-pulse-iq",          // expected aud (null = not enforced)
     Duration.ofSeconds(30)     // clock skew tolerance
 );
 
@@ -161,7 +161,7 @@ Verifies gateway-minted `v4.local` tokens (used when `mode=local`, the deployed 
 PasetoVerifier verifier = new PasetoV4LocalVerifier(
     keyBase64,          // 32-byte symmetric key (hex or base64)
     "edge",             // expected iss
-    "event-analysis",   // expected aud
+    "media-pulse-iq",   // expected aud
     Duration.ofSeconds(30)
 );
 
@@ -200,7 +200,7 @@ Produces short-lived `v4.local` tokens. In production, this logic runs **at the 
 PasetoV4LocalIssuer issuer = new PasetoV4LocalIssuer(
     sharedKeyBase64,
     "edge",           // iss
-    "event-analysis"  // aud
+    "media-pulse-iq"  // aud
 );
 
 // Mint a 60-second internal token for the verified tenant
@@ -430,7 +430,7 @@ X-Internal-Token header forwarded to microservice
 PasetoClaims (tenantId, scopes, allowedCampaigns, exp, iss, aud)
 ```
 
-The external token **never** enters the internal mesh. The internal token has a tiny TTL (~60 seconds), an audience scoped to `event-analysis`, and carries the same claims as the external token. Services verify the internal token with the shared `PASETO_LOCAL_KEY`.
+The external token **never** enters the internal mesh. The internal token has a tiny TTL (~60 seconds), an audience scoped to `media-pulse-iq`, and carries the same claims as the external token. Services verify the internal token with the shared `PASETO_LOCAL_KEY`.
 
 ---
 

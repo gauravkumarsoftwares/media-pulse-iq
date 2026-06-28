@@ -1,0 +1,28 @@
+# =====================================================================
+# PROD overlay - full HA in the prod namespace.
+# ConfigMap holds non-secret env; credentials & PASETO_PUBLIC_KEY come
+# from a K8s Secret synced by External Secrets Operator (AWS SM / Vault).
+# HPA/KEDA (defined in base) govern the actual replica scaling.
+# =====================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: prod
+
+resources:
+  - ../../base
+
+configMapGenerator:
+  - name: app-config
+    envs:
+      - configmap.env
+
+# Minimum replica floors for production (HPA/KEDA scale above these).
+replicas:
+  - name: ingestion-service
+    count: 10
+  - name: stream-processing-engine
+    count: 3
+  - name: insights-query-service
+    count: 5
+

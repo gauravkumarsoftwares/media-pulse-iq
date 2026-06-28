@@ -37,7 +37,7 @@ platform:
     parallelism: 64     # match prod Kafka partition count
     use-rocks-db: true
     checkpoint-interval-ms: 30000
-    checkpoint-dir: ${FLINK_CHECKPOINT_DIR:s3://event-analysis-prod/flink-checkpoints}
+    checkpoint-dir: ${FLINK_CHECKPOINT_DIR:s3://media-pulse-iq-prod/flink-checkpoints}
     # OB-3: Flink Prometheus reporter on dedicated port
     prometheus-enabled: true
     prometheus-port: ${FLINK_PROMETHEUS_PORT:9249}
