@@ -2,9 +2,8 @@ package com.java.query.reconciliation;
 
 import com.java.query.common.ApiException;
 import com.java.query.dto.ReconciliationDetailDto;
-import com.java.query.dto.ReconciliationStatusEntry;
-import com.java.query.dto.ReconciliationSummaryDto;
-import com.java.query.security.PasetoProperties;
+import com.java.query.dto.ReconciliationRunSummary;
+import com.java.security.paseto.PasetoProperties;
 import com.java.query.service.ReconciliationQueryService;
 import com.java.query.common.PagedResponse;
 import org.junit.jupiter.api.DisplayName;
@@ -144,18 +143,18 @@ class ReconciliationControllerTest {
 
     // ---- helpers -----------------------------------------------------------
 
-    private static ReconciliationStatusEntry noRunYet() {
-        return new ReconciliationStatusEntry(null, "NO_RUN_YET", null, null, null, 0, 0, 0, 0, null);
+    private static ReconciliationRunSummary noRunYet() {
+        return new ReconciliationRunSummary(null, "NO_RUN_YET", null, null, null, 0, 0, 0, 0, null);
     }
 
-    private static ReconciliationStatusEntry okEntry() {
-        return new ReconciliationStatusEntry("run-1", "OK",
+    private static ReconciliationRunSummary okEntry() {
+        return new ReconciliationRunSummary("run-1", "OK",
                 "2026-06-26T01:00:00Z", "2026-06-25T23:00:00Z", "2026-06-26T01:00:00Z",
                 0, 0, 0, 100L, null);
     }
 
-    private static ReconciliationSummaryDto summary() {
-        return new ReconciliationSummaryDto("run-1", "OK",
+    private static ReconciliationRunSummary summary() {
+        return new ReconciliationRunSummary("run-1", "OK",
                 "2026-06-26T01:00:00Z", null, null, 0, 0, 0, 100L, null);
     }
 

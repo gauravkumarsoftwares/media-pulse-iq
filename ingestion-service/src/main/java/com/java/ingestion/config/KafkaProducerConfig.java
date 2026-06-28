@@ -45,12 +45,37 @@ public class KafkaProducerConfig {
         // Schema Registry endpoint — picked up by KafkaAvroSerializer inside
         // ShoppingEventConfluentSerializer.configure().
         props.put("schema.registry.url", schemaRegistryUrl);
-        props.putIfAbsent(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 5000);
+
+        // ---- Zero-loss: idempotent producer (architecture 2.4) ---------------
+        // Prevents broker-side duplicate writes on retry.
+        // Requires acks=all (set in application.yml) and max.in.flight <= 5.
+        // Kafka client validates this combination at startup — fail-fast on mis-config.
+        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG,              true);
+        props.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION,  5);
+        // Effectively infinite retries within the delivery window.
+        props.putIfAbsent(ProducerConfig.RETRIES_CONFIG,               Integer.MAX_VALUE);
+        props.putIfAbsent(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG,   120_000);   // 2 min
+        props.putIfAbsent(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG,    30_000);    // per-attempt
+
+        // ---- Throughput: batching + compression ------------------------------
+        // Wait up to 10 ms to accumulate a fuller batch before sending.
+        props.putIfAbsent(ProducerConfig.LINGER_MS_CONFIG,      10);
+        // 64 KB max batch size per partition.
+        props.putIfAbsent(ProducerConfig.BATCH_SIZE_CONFIG,     65_536);
+        // 64 MB total in-flight buffer; producer blocks after this (back-pressure).
+        props.putIfAbsent(ProducerConfig.BUFFER_MEMORY_CONFIG,  67_108_864L);
+        // LZ4 gives ~50–60 % size reduction on Avro payloads with minimal CPU cost.
+        props.putIfAbsent(ProducerConfig.COMPRESSION_TYPE_CONFIG, "lz4");
+
         return new DefaultKafkaProducerFactory<>(props);
     }
 
     @Bean
     public KafkaTemplate<String, ShoppingEvent> kafkaTemplate() {
-        return new KafkaTemplate<>(producerFactory());
+        KafkaTemplate<String, ShoppingEvent> template = new KafkaTemplate<>(producerFactory());
+        // OB-1: enable Micrometer Observation so each send creates a tracing span and
+        // injects the W3C traceparent header into every ProducerRecord.
+        template.setObservationEnabled(true);
+        return template;
     }
 }

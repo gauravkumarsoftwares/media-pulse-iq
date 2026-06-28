@@ -1,5 +1,6 @@
 package com.java.query.router;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -8,22 +9,21 @@ import java.time.Instant;
 /**
  * Time-boundary routing engine for the hybrid read path (architecture 5.2).
  *
- * <p>Selects the serving tier based on how far back the query window reaches:
- * <ul>
- *   <li>&lt; 48 hours → {@link QueryTier#REDIS_CACHE}</li>
- *   <li>&lt; 30 days  → {@link QueryTier#PINOT_OLAP}</li>
- *   <li>otherwise     → {@link QueryTier#TRINO_LAKEHOUSE}</li>
- * </ul>
+ * <p>Tier boundaries are now externalised via {@link TierRoutingProperties}
+ * (OCP fix — B2): changing {@code platform.query.routing.hot-window-hours}
+ * or {@code warm-window-days} requires no recompile.
  *
- * <p>In this reference build all tiers resolve against the same in-memory store;
- * the engine still determines the authoritative {@code source} label so the
- * routing contract is testable and ready to back real stores later.
+ * <ul>
+ *   <li>within hot window  → {@link QueryTier#REDIS_CACHE}</li>
+ *   <li>within warm window → {@link QueryTier#PINOT_OLAP}</li>
+ *   <li>beyond warm window → {@link QueryTier#TRINO_LAKEHOUSE}</li>
+ * </ul>
  */
 @Component
+@RequiredArgsConstructor
 public final class TierRoutingEngine {
 
-    private static final Duration HOT_WINDOW = Duration.ofHours(48);
-    private static final Duration WARM_WINDOW = Duration.ofDays(30);
+    private final TierRoutingProperties props;
 
     /**
      * Resolve the serving tier for a query whose earliest boundary is {@code from}.
@@ -35,14 +35,14 @@ public final class TierRoutingEngine {
         if (from == null) {
             return QueryTier.REDIS_CACHE;
         }
+
         Duration age = Duration.between(from, Instant.now());
-        if (age.compareTo(HOT_WINDOW) <= 0) {
+        if (age.compareTo(props.hotWindow()) <= 0) {
             return QueryTier.REDIS_CACHE;
         }
-        if (age.compareTo(WARM_WINDOW) <= 0) {
+        if (age.compareTo(props.warmWindow()) <= 0) {
             return QueryTier.PINOT_OLAP;
         }
         return QueryTier.TRINO_LAKEHOUSE;
     }
 }
-

@@ -2,7 +2,19 @@ spring:
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka-prod-msk:9094}
     producer:
-      retries: 10
+      acks: all
+      retries: 2147483647
+      properties:
+        # ---- Zero-loss: idempotent producer ---------------------------------
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        delivery.timeout.ms: 120000
+        request.timeout.ms: 30000
+        # ---- Throughput: batching + LZ4 compression -------------------------
+        linger.ms: 10
+        batch.size: 65536
+        buffer.memory: 67108864
+        compression.type: lz4
     properties:
       security.protocol: ${KAFKA_SECURITY_PROTOCOL:SASL_SSL}
       sasl.mechanism: ${KAFKA_SASL_MECHANISM:SCRAM-SHA-512}
@@ -17,7 +29,7 @@ platform:
       mode: local
       local-key: ${PASETO_LOCAL_KEY:}
       issuer: ${PASETO_ISSUER:edge}
-      audience: ${PASETO_AUDIENCE:media-pulse-iq}
+      audience: ${PASETO_AUDIENCE:event-analysis}
       token-header: ${PASETO_TOKEN_HEADER:X-Internal-Token}
       clock-skew-seconds: 30
 
@@ -41,3 +53,11 @@ management:
       show-details: never
       probes:
         enabled: true
+  # ---- OB-1: Distributed Tracing (prod) ----
+  # Reduce sampling to 10% to limit span volume; critical-path traces sampled probabilistically.
+  tracing:
+    sampling:
+      probability: 0.1
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://otel-collector:4318/v1/traces}

@@ -1,6 +1,6 @@
 # shared-model
 
-> **Role in the platform:** Shared internal library that defines the canonical data model, Avro serialization/deserialization, and Kafka topic naming conventions used across all services (`ingestion-service`, `stream-processing-engine`, `insights-query-service`).
+> **Role in the platform:** Shared internal library that defines the canonical data model, Avro serialization/deserialization, Redis key naming conventions, and Kafka topic naming conventions used across all services (`ingestion-service`, `stream-processing-engine`, `insights-query-service`).
 
 ---
 
@@ -14,6 +14,7 @@
 - [Avro Serialization](#avro-serialization)
   - [ShoppingEventAvroSerde](#shoppingeventavroserde)
   - [Confluent SerDes](#confluent-serdes)
+- [Redis Key Schema](#redis-key-schema)
 - [Kafka Topic Conventions](#kafka-topic-conventions)
   - [Naming Convention](#naming-convention)
   - [Topic Catalogue](#topic-catalogue)
@@ -30,7 +31,8 @@
 
 1. **The `ShoppingEvent` domain object** — the unit of data flowing through the entire platform pipeline, from the HTTP ingest endpoint through Kafka, Flink processing, Pinot storage, and the query serving layer.
 2. **Avro wire format** — Confluent Schema Registry–compatible serializers and deserializers so every producer and consumer is guaranteed schema compatibility.
-3. **Kafka topic naming** — centralized naming conventions and template constants prevent topic-name drift across services.
+3. **Redis key schema** — centralized key and field naming patterns so the Flink write path (`stream-processing-engine → RedisHotCounterSink`) and the Spring read path (`insights-query-service → RedisInsightsStore`) always agree on key structure.
+4. **Kafka topic naming** — centralized naming conventions and template constants prevent topic-name drift across services.
 
 By publishing this as a shared library, the platform enforces a strict contract boundary: any change to `ShoppingEvent` is a deliberate, compile-breaking contract change that must be versioned.
 
@@ -48,8 +50,11 @@ com.java.model/
 │   ├── ShoppingEventConfluentDeserializer.java   # Confluent KafkaAvroDeserializer wrapper
 │   └── ShoppingEventConfluentSerializer.java     # Confluent KafkaAvroSerializer wrapper
 │
-└── constants/
-    └── KafkaTopics.java           # Topic/consumer-group name templates + resolve() utility
+├── constants/
+│   └── KafkaTopics.java           # Topic/consumer-group name templates + resolve() utility
+│
+└── redis/
+    └── RedisKeySchema.java        # Canonical Redis key/field patterns for campaign counters + time-series
 ```
 
 ---
@@ -85,7 +90,7 @@ public class ShoppingEvent implements Serializable {
 | `sessionId` | validated | attribution join key | — | — | — |
 | `campaignId` | optional | attribution output | hash-key segment | filter | path variable |
 | `eventType` | schema-validated | routes to sinks | hash-field | event_type column | metric type |
-| `eventTimestampMs` | defaulted to server time if 0 | watermark source | — | time-series bucketing | `from`/`to` window |
+| `eventTimestampMs` | defaulted to server time if 0 | watermark source | time-series bucket | time-series bucketing | `from`/`to` window |
 
 ### EventType
 
@@ -189,6 +194,40 @@ platform:
 
 ---
 
+## Redis Key Schema
+
+`RedisKeySchema` is the single source of truth for all Redis key and field naming patterns used across the platform. It prevents the write path (`RedisHotCounterSink` in `stream-processing-engine`) and the read path (`RedisInsightsStore` in `insights-query-service`) from drifting to different key formats independently.
+
+### Key Patterns
+
+```
+Aggregate hash key  :  campaign:{tenantId}:{campaignId}
+Hash field          :  {eventType}   (CLICK, IMPRESSION, CLICK_TO_BASKET)
+Value               :  counter (HINCRBY — total aggregate)
+
+Time-series hash key  :  ts:{tenantId}:{campaignId}:{eventType}
+Hash field            :  {hourBucket_epoch_ms}  (hour-aligned, milliseconds)
+Value                 :  counter per bucket (HINCRBY)
+```
+
+### API
+
+```java
+// Aggregate hash key for campaign counters
+String key = RedisKeySchema.hashKey("walmart_us", "cmp_spring_99a");
+// → "campaign:walmart_us:cmp_spring_99a"
+
+// Time-series hash key — one key per (tenant, campaign, eventType)
+String tsKey = RedisKeySchema.timeSeriesKey("walmart_us", "cmp_spring_99a", "CLICK");
+// → "ts:walmart_us:cmp_spring_99a:CLICK"
+
+// Truncate event timestamp to the start of its UTC hour (hash field for time-series)
+long bucket = RedisKeySchema.hourBucket(1750500000000L);
+// → epoch ms of the hour-aligned boundary
+```
+
+---
+
 ## Kafka Topic Conventions
 
 ### Naming Convention
@@ -269,9 +308,9 @@ mvn install -DskipTests
 
 | Principle | Application |
 |:----------|:------------|
-| **Single Source of Truth** | One `ShoppingEvent` class, one Avro schema, one `KafkaTopics` catalogue — no duplication across modules |
+| **Single Source of Truth** | One `ShoppingEvent` class, one Avro schema, one `KafkaTopics` catalogue, one `RedisKeySchema` — no duplication across modules |
 | **Forward-compatible Avro schema** | All string fields use `["null", "string"]` union with `null` default — new optional fields can be added without breaking existing consumers |
 | **No Spring dependencies** | `shared-model` is a plain Java library. It does not import Spring Boot; any module can use it regardless of framework |
 | **String-typed `eventType` on the wire** | Using `String` instead of the `EventType` enum allows unknown future event types to pass through the Kafka/Avro layer; type safety is enforced at the application level by `EventType.from()` |
 | **Immutable `EventType.from()`** | Null-safe, case-insensitive, never throws — maps unknown strings to `UNSPECIFIED` so the caller can decide how to handle them |
-
+| **`RedisKeySchema` as DRY boundary** | Key-building logic is shared so that the Flink sink and the Spring read service are always structurally compatible — a key format change is a compile-visible contract change |

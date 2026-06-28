@@ -60,6 +60,27 @@
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
 
+        <!-- ===== Observability — Distributed Tracing (OB-1) ===== -->
+        <!-- Bridges Micrometer Observation API → OpenTelemetry SDK. Enables Spring Boot
+             auto-configuration of Tracer. HTTP + Spring Kafka spans are created automatically
+             when spring.kafka.template.observation-enabled / listener.observation-enabled = true. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+        </dependency>
+        <!-- OTLP gRPC exporter — ships trace spans to OTEL Collector / Jaeger. -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+
+        <!-- ===== Observability — Structured Log Aggregation (OB-5) ===== -->
+        <!-- Logstash JSON encoder; activated in prod spring profile by logback-spring.xml. -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
@@ -82,4 +103,3 @@
         </plugins>
     </build>
 </project>
-

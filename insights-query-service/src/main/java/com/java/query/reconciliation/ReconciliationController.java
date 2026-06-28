@@ -2,8 +2,7 @@ package com.java.query.reconciliation;
 
 import com.java.query.common.PagedResponse;
 import com.java.query.dto.ReconciliationDetailDto;
-import com.java.query.dto.ReconciliationStatusEntry;
-import com.java.query.dto.ReconciliationSummaryDto;
+import com.java.query.dto.ReconciliationRunSummary;
 import com.java.query.service.ReconciliationQueryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -25,9 +24,6 @@ import java.util.Map;
  *   GET  /api/v1/reconciliation/reports/{window}/latest — most recent full report
  *   POST /api/v1/reconciliation/runs/{window}           — trigger an on-demand run
  * </pre>
- *
- * <p>All mutation endpoints ({@code POST /runs}) are intended for SRE tooling
- * and should be protected behind an internal network or an admin role in production.
  */
 @RestController
 @RequestMapping("/api/v1/reconciliation")
@@ -37,16 +33,12 @@ public class ReconciliationController {
 
     private final ReconciliationQueryService reconciliationService;
 
-    // ---- GET /status -------------------------------------------------------
-
     @GetMapping("/status")
     @Operation(summary = "Latest run summary for all reconciliation windows")
     @ApiResponse(responseCode = "200", description = "Status map keyed by window label")
-    public ResponseEntity<Map<String, ReconciliationStatusEntry>> status() {
+    public ResponseEntity<Map<String, ReconciliationRunSummary>> status() {
         return ResponseEntity.ok(reconciliationService.getStatus());
     }
-
-    // ---- GET /reports/{window} ---------------------------------------------
 
     @GetMapping("/reports/{window}")
     @Operation(summary = "Paginated report list for a window type (newest first)")
@@ -54,13 +46,11 @@ public class ReconciliationController {
             @ApiResponse(responseCode = "200", description = "Report list returned"),
             @ApiResponse(responseCode = "400", description = "Unknown window type")
     })
-    public ResponseEntity<PagedResponse<ReconciliationSummaryDto>> listReports(
+    public ResponseEntity<PagedResponse<ReconciliationRunSummary>> listReports(
             @PathVariable String window,
             @RequestParam(defaultValue = "10") int limit) {
         return ResponseEntity.ok(reconciliationService.listReports(window, limit));
     }
-
-    // ---- GET /reports/{window}/latest -------------------------------------
 
     @GetMapping("/reports/{window}/latest")
     @Operation(summary = "Most recent full report for a window type")
@@ -76,8 +66,6 @@ public class ReconciliationController {
         return ResponseEntity.ok(detail);
     }
 
-    // ---- POST /runs/{window} -----------------------------------------------
-
     @PostMapping("/runs/{window}")
     @Operation(summary = "Trigger an on-demand reconciliation run",
                description = "Runs synchronously. Protect with an admin role in production.")
@@ -86,7 +74,7 @@ public class ReconciliationController {
             @ApiResponse(responseCode = "400", description = "Unknown window type")
     })
     public ResponseEntity<ReconciliationDetailDto> triggerRun(@PathVariable String window) {
-        ReconciliationDetailDto report = reconciliationService.triggerRun(window);
-        return ResponseEntity.status(HttpStatus.OK).body(report);
+        return ResponseEntity.status(HttpStatus.OK)
+                .body(reconciliationService.triggerRun(window));
     }
 }

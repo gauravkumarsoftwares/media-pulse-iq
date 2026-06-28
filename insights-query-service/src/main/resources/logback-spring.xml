@@ -5,29 +5,54 @@
     * SECURITY_AUDIT is a dedicated, always-on (INFO) stream of key=value auth
       events, routed to its own appender for SIEM scraping (additivity=false so
       it is not duplicated into the root logger).
+  Observability (OB-2):
+    * %X{requestId} and %X{tenantId} are included in every line, sourced from
+      SLF4J MDC populated by MdcFilter and restored by AggregateConsumer.
+  Observability (OB-5):
+    * In the "prod" profile the root appender is replaced by a LogstashEncoder
+      JSON appender for Fluent Bit → Loki aggregation.
 -->
 <configuration>
+
+    <springProperty scope="context" name="SERVICE_NAME" source="spring.application.name" defaultValue="insights-query-service"/>
 
     <property name="MASK_PATTERN"
               value="%replace(%replace(%msg){'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}','***@***'}){'\b(?:\d{1,3}\.){3}\d{1,3}\b','***.***.***.***'}"/>
 
+    <!-- Development / staging console appender with MDC correlation IDs (OB-2) -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - ${MASK_PATTERN}%n</pattern>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{requestId}] [%X{tenantId}] %logger{36} - ${MASK_PATTERN}%n</pattern>
         </encoder>
     </appender>
 
     <appender name="AUDIT" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} AUDIT %-5level ${MASK_PATTERN}%n</pattern>
+            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} AUDIT %-5level [%X{requestId}] [%X{tenantId}] ${MASK_PATTERN}%n</pattern>
         </encoder>
     </appender>
+
+    <!-- Production: structured JSON → Fluent Bit → Loki (OB-5) -->
+    <springProfile name="prod">
+        <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <includeMdcKeyName>requestId</includeMdcKeyName>
+                <includeMdcKeyName>tenantId</includeMdcKeyName>
+                <customFields>{"service":"${SERVICE_NAME}","env":"prod"}</customFields>
+            </encoder>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="JSON"/>
+        </root>
+    </springProfile>
 
     <logger name="SECURITY_AUDIT" level="INFO" additivity="false">
         <appender-ref ref="AUDIT"/>
     </logger>
 
-    <root level="INFO">
-        <appender-ref ref="CONSOLE"/>
-    </root>
+    <springProfile name="!prod">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
 </configuration>

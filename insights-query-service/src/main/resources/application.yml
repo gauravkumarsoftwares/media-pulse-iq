@@ -6,6 +6,18 @@ spring:
   kafka:
     consumer:
       group-id: "${platform.kafka.consumer-group.insights-serving}"
+      # ---- Zero-loss: manual offset commit --------------------------------
+      enable-auto-commit: false
+      properties:
+        fetch.min.bytes: 1048576
+        fetch.max.wait.ms: 500
+        max.poll.interval.ms: 300000
+        heartbeat.interval.ms: 15000
+        session.timeout.ms: 45000
+      max-poll-records: 500
+    listener:
+      ack-mode: MANUAL_IMMEDIATE
+      concurrency: ${KAFKA_LISTENER_CONCURRENCY:3}
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -20,17 +32,32 @@ spring:
 
 server:
   port: 8083
+  # ---- Tomcat access log (architecture 8 — observability) ----
+  tomcat:
+    accesslog:
+      enabled: true
+      directory: logs
+      prefix: access_log
+      suffix: .log
+      rotate: true
+      rename-on-rotate: true
+      max-days: 30
+      pattern: '%h %l %u %t "%r" %s %b %D ms tenant="%{X-Tenant-Context}i" reqId="%{X-Request-Id}i"'
+      buffered: false
 
 platform:
   kafka:
     env: ${KAFKA_ENV:local}
     topic:
-      # internal.event → enriched + attributed events from stream-processing-engine
-      # Key: tenantId:campaignId
       enriched: "${platform.kafka.env}.internal.event.ads.attribution.ad-interaction-enriched-by-campaign"
     consumer-group:
       stream-engine: "${platform.kafka.env}.ads.stream-processing-engine"
       insights-serving: "${platform.kafka.env}.ads.insights-query-service"
+  query:
+    max-buckets: 10000        # BUCKET-CAP: max grain-aligned buckets per time-series response
+    routing:
+      hot-window-hours: 48   # OCP: tier boundary — queries within 48 h → Redis
+      warm-window-days: 30   # OCP: tier boundary — queries within 30 d → Pinot
   pinot:
     broker: ${PINOT_BROKER:localhost:8099}
     scheme: ${PINOT_SCHEME:http}          # http (default) or https
@@ -94,3 +121,21 @@ management:
     health:
       probes:
         enabled: true
+  # ---- OB-1: Distributed Tracing ----
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://otel-collector:4318/v1/traces}
+
+# ---- Logging (access logs + service layer) ----
+logging:
+  level:
+    # API access log: logs every inbound request before and after dispatch
+    org.springframework.web.filter.CommonsRequestLoggingFilter: DEBUG
+    # Service / business logic layers
+    com.java.query: DEBUG
+    # Reduce framework noise in production — override per-environment as needed
+    org.springframework.kafka: WARN
+    org.apache.kafka: WARN

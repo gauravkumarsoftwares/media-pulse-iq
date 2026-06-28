@@ -1,13 +1,22 @@
 package com.java.query.service;
 
+import com.java.query.dto.TimeSeriesPoint;
+
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Read-side query abstraction (Interface Segregation, architecture 5).
  */
 public interface QueryService {
+
+    /**
+     * Default hot-window look-back when no {@code from} is supplied (A3 — DRY).
+     * Single source of truth shared by {@link TieredInsightsEngine} and
+     * {@link InsightsServiceImpl}.
+     */
+    Duration DEFAULT_HOT_WINDOW = Duration.ofHours(2);
 
     /**
      * Return the total aggregated count for a campaign metric.
@@ -31,8 +40,7 @@ public interface QueryService {
 
     /**
      * Return a bucketed time-series of counts for the given metric.
-     * Each entry in the list is a {@code {timestamp, value}} map representing
-     * one grain bucket between {@code from} and {@code to}.
+     * Each {@link TimeSeriesPoint} represents one grain bucket between {@code from} and {@code to}.
      *
      * <p>Default implementation returns a single aggregate point (compatible
      * with implementations that don't support time-series bucketing).
@@ -44,15 +52,14 @@ public interface QueryService {
      * @param to         window end (inclusive); null = now
      * @param grain      bucket granularity: {@code minute}, {@code hour}, {@code day}
      * @param placement  optional placement filter (null = all placements)
-     * @return ordered list of {timestamp, value} buckets
+     * @return ordered list of bucketed data points
      */
-    default List<Map<String, Object>> getTimeSeries(String tenantId, String campaignId,
-                                                     String metricType,
-                                                     Instant from, Instant to,
-                                                     String grain, String placement) {
+    default List<TimeSeriesPoint> getTimeSeries(String tenantId, String campaignId,
+                                                 String metricType,
+                                                 Instant from, Instant to,
+                                                 String grain, String placement) {
         long total = getCampaignCount(tenantId, campaignId, metricType, from);
-        return List.of(Map.of("timestamp", (to != null ? to : Instant.now()).toString(),
-                "value", total));
+        return List.of(new TimeSeriesPoint(
+                (to != null ? to : Instant.now()).toString(), total));
     }
 }
-

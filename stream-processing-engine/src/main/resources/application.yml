@@ -6,6 +6,40 @@ spring:
   kafka:
     consumer:
       group-id: "${platform.kafka.consumer-group.stream-engine}"
+      # ---- Zero-loss: manual offset commit --------------------------------
+      # Spring Kafka enforces this when AckMode=MANUAL_IMMEDIATE; set explicitly
+      # for documentation and defence-in-depth.
+      enable-auto-commit: false
+      properties:
+        # ---- Throughput: fetch tuning ---------------------------------------
+        # Broker waits until 1 MB is available before responding (reduces round-trips).
+        fetch.min.bytes: 1048576
+        # Max wait even if fetch.min.bytes is not met.
+        fetch.max.wait.ms: 500
+        # Must exceed time to fully process max-poll-records records.
+        max.poll.interval.ms: 300000
+        # Heartbeat interval (must be < session.timeout.ms / 3).
+        heartbeat.interval.ms: 15000
+        session.timeout.ms: 45000
+      max-poll-records: 500
+    listener:
+      # MANUAL_IMMEDIATE: commit only after onMessage() returns successfully.
+      ack-mode: MANUAL_IMMEDIATE
+      # Set to Kafka partition count in staging/prod via KAFKA_LISTENER_CONCURRENCY.
+      # Each thread owns whole partitions — per-partition order is preserved.
+      concurrency: ${KAFKA_LISTENER_CONCURRENCY:3}
+    producer:
+      acks: all
+      retries: 2147483647
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        delivery.timeout.ms: 120000
+        request.timeout.ms: 30000
+        linger.ms: 10
+        batch.size: 65536
+        buffer.memory: 67108864
+        compression.type: lz4
 
 server:
   port: 8082
@@ -25,6 +59,8 @@ platform:
       # Consolidates the legacy 'aggregates' and 'enriched' topics into one.
       # Key: tenantId:campaignId
       enriched: "${platform.kafka.env}.internal.event.ads.attribution.ad-interaction-enriched-by-campaign"
+      # DLQ: events that fail all consumer retries are parked here for SRE replay.
+      dlq: "${platform.kafka.env}.internal.event.ads.clickstream.stream-processing-failed-by-tenant-id"
     consumer-group:
       stream-engine: "${platform.kafka.env}.ads.stream-processing-engine"
       insights-serving: "${platform.kafka.env}.ads.insights-query-service"
@@ -41,6 +77,9 @@ platform:
     redis-password: ${REDIS_PASSWORD:}
     redis-database: 0
     redis-ttl-seconds: 172800
+    # OB-3: Flink Prometheus reporter — exposes Flink native metrics on a dedicated port.
+    prometheus-enabled: true
+    prometheus-port: 9249
 
 management:
   server:
@@ -53,3 +92,10 @@ management:
     health:
       probes:
         enabled: true
+  # ---- OB-1: Distributed Tracing ----
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://otel-collector:4318/v1/traces}

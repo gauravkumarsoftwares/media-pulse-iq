@@ -6,7 +6,20 @@ spring:
   kafka:
     producer:
       acks: all
-      retries: 3
+      # Effectively infinite retries; actual retry window is bounded by delivery.timeout.ms.
+      retries: 2147483647
+      properties:
+        # ---- Zero-loss: idempotent producer ---------------------------------
+        # Prevents broker-side duplicate writes on retry. Requires acks=all.
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        delivery.timeout.ms: 120000   # 2 min total retry window
+        request.timeout.ms: 30000     # per-attempt broker timeout
+        # ---- Throughput: batching + LZ4 compression -------------------------
+        linger.ms: 10                 # wait up to 10 ms to fill a batch
+        batch.size: 65536             # 64 KB per-partition batch
+        buffer.memory: 67108864       # 64 MB producer buffer before back-pressure
+        compression.type: lz4         # ~50-60 % size reduction; lowest CPU cost
   # Redis for distributed per-tenant rate limiting
   data:
     redis:
@@ -22,6 +35,22 @@ spring:
 
 server:
   port: 8080
+  # ---- Tomcat access log (architecture 8 — observability) ----
+  # Logs every HTTP request/response to a rolling file next to the process.
+  # Pattern fields: %h=client-ip  %l=ident  %u=auth-user  %t=timestamp
+  #                 %r=request-line  %s=status  %b=bytes  %D=elapsed-ms
+  #                 %{X-Tenant-Context}i=tenant  %{X-Request-Id}i=correlation-id
+  tomcat:
+    accesslog:
+      enabled: true
+      directory: logs
+      prefix: access_log
+      suffix: .log
+      rotate: true
+      rename-on-rotate: true
+      max-days: 30
+      pattern: '%h %l %u %t "%r" %s %b %D ms tenant="%{X-Tenant-Context}i" reqId="%{X-Request-Id}i"'
+      buffered: false
 
 platform:
   kafka:
@@ -66,3 +95,22 @@ management:
     health:
       probes:
         enabled: true
+  # ---- OB-1: Distributed Tracing ----
+  # 100% sampling locally; reduce to 10% in prod (see application-prod.yml).
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://otel-collector:4318/v1/traces}
+
+# ---- Logging (access logs + service layer) ----
+logging:
+  level:
+    # API access log: logs every inbound request before and after dispatch
+    org.springframework.web.filter.CommonsRequestLoggingFilter: DEBUG
+    # Service / business logic layers
+    com.java.ingestion: DEBUG
+    # Reduce framework noise in production — override per-environment as needed
+    org.springframework.kafka: WARN
+    org.apache.kafka: WARN

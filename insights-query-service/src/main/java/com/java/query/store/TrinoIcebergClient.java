@@ -1,6 +1,7 @@
 package com.java.query.store;
 
 import com.java.query.config.TrinoProperties;
+import com.java.query.dto.TimeSeriesPoint;
 import com.java.query.reconciliation.CampaignKey;
 import com.java.query.reconciliation.CampaignMetricCount;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -21,9 +22,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Production cold-tier query client for Trino-on-Iceberg (architecture 4.3).
@@ -265,13 +264,13 @@ public class TrinoIcebergClient {
      * @param grain      {@code minute}, {@code hour}, or {@code day}
      * @return ordered list of {@code {timestamp, value}} buckets; empty on error
      */
-    public List<Map<String, Object>> queryTimeSeries(String tenantId, String campaignId,
-                                                      String metricType,
-                                                      Instant from, Instant to,
-                                                      String grain) {
-        if (!isAvailable()) return Collections.emptyList();
+    public List<TimeSeriesPoint> queryTimeSeries(String tenantId, String campaignId,
+                                                  String metricType,
+                                                  Instant from, Instant to,
+                                                  String grain) {
+        if (!isAvailable()) return Collections.<TimeSeriesPoint>emptyList();
 
-        // sanitizeGrain returns one of {"minute","hour","day"} — safe to format into SQL.
+        // sanitizeGrain returns one of {"minute","hour","day"} — safe to substitute into SQL.
         String sql = String.format(sqlTimeSeriesTemplate, sanitizeGrain(grain));
 
         Timer.Sample sample = Timer.start(meterRegistry);
@@ -285,14 +284,11 @@ public class TrinoIcebergClient {
             stmt.setString(4, toDateString(from));
             stmt.setString(5, toDateString(to));
 
-            List<Map<String, Object>> series = new ArrayList<>();
+            List<TimeSeriesPoint> series = new ArrayList<>();
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
                     Timestamp bucket = rs.getTimestamp("bucket");
-                    Map<String, Object> point = new LinkedHashMap<>();
-                    point.put("timestamp", bucket.toInstant().toString());
-                    point.put("value", rs.getLong("cnt"));
-                    series.add(point);
+                    series.add(new TimeSeriesPoint(bucket.toInstant().toString(), rs.getLong("cnt")));
                 }
             }
             log.debug("[trino] queryTimeSeries tenant={} campaign={} metric={} grain={} → {} buckets",

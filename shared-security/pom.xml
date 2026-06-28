@@ -27,6 +27,31 @@
             <artifactId>jackson-databind</artifactId>
         </dependency>
 
+        <!-- Spring Boot auto-configuration support (PasetoSecurityConfig @AutoConfiguration). -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!-- Spring Web (OncePerRequestFilter for AbstractPasetoAuthenticationFilter). -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!-- Servlet API (HttpServletRequest / HttpServletResponse). -->
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!-- SLF4J for @Slf4j and AUDIT logger (version managed by Spring Boot BOM). -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- XChaCha20 + BLAKE2b for PASETO v4.local (managed by the Spring Boot BOM). -->
         <dependency>
             <groupId>org.bouncycastle</groupId>
@@ -40,4 +65,3 @@
         </dependency>
     </dependencies>
 </project>
-

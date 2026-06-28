@@ -1,19 +1,21 @@
 package com.java.query.reconciliation;
 
+import com.java.model.redis.RedisKeySchema;
+
 /**
  * Immutable value object identifying a single campaign metric dimension
  * (tenantId × campaignId × eventType).
  *
- * <p>Used as the grouping key throughout the reconciliation pipeline.
+ * <p>Key building is delegated to {@link RedisKeySchema} (D3 DRY fix).
  */
 public record CampaignKey(String tenantId, String campaignId, String eventType) {
 
-    /** Redis hash key:  {@code campaign:{tenantId}:{campaignId}} */
+    /** Redis aggregate hash key: {@code campaign:{tenantId}:{campaignId}} */
     public String redisHashKey() {
-        return "campaign:" + tenantId + ":" + campaignId;
+        return RedisKeySchema.hashKey(tenantId, campaignId);
     }
 
-    /** Redis hash field: the event type string (CLICK, IMPRESSION, …) */
+    /** Redis aggregate hash field: the event type string (CLICK, IMPRESSION, …) */
     public String redisHashField() {
         return eventType;
     }

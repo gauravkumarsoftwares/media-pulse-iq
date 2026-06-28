@@ -1,5 +1,5 @@
 # System Design Document (SDD)
-## Gemini-Flash Real-Time Streaming Insight Platform
+## Real-Time Streaming Insight Platform
 
 > **Version:** 1.0 · **Date:** 2026-06-26 · **Status:** Current implementation
 > **Audience:** Platform engineers, architects, SREs, tech leads

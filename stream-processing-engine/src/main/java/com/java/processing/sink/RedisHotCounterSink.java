@@ -1,6 +1,7 @@
 package com.java.processing.sink;
 
 import com.java.model.ShoppingEvent;
+import com.java.model.redis.RedisKeySchema;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
@@ -9,16 +10,22 @@ import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.JedisPoolConfig;
 
 /**
- * Flink {@link RichSinkFunction} that increments campaign hot-counters in Redis
- * using atomic {@code HINCRBY} operations (architecture 4, hot tier &lt;48 h).
+ * Flink sink that writes campaign hot-counters and per-hour time-series buckets
+ * to Redis (architecture 4, hot tier &lt;48 h).
  *
- * <p><strong>Key schema:</strong> {@code campaign:{tenantId}:{campaignId}}
- * <br><strong>Hash field:</strong> {@code eventType} (CLICK, IMPRESSION, CLICK_TO_BASKET …)
- * <br><strong>TTL:</strong> configurable via {@code platform.flink.redis-ttl-seconds} (default 48 h).
+ * <h3>Keys written per event</h3>
+ * <pre>
+ *   HINCRBY campaign:{tenantId}:{campaignId}  {eventType}     1   — aggregate counter
+ *   HINCRBY ts:{tenantId}:{campaignId}:{eventType}  {hourBucket_ms}  1  — time-series bucket
+ * </pre>
  *
- * <p>The {@link JedisPool} is {@code transient} and created in {@link #open(Configuration)} so
- * it is never included in Flink's operator checkpoint serialisation.  This class is safe for
- * distributed Flink execution where each TaskManager constructs its own pool.
+ * <p>Key formats are defined in {@link RedisKeySchema} (shared-model) so this
+ * sink and {@link com.java.query.store.RedisInsightsStore} always use the same
+ * schema (DRY — D3). The time-series hash enables
+ * {@link com.java.query.handler.RedisCacheTierHandler} to serve exact
+ * per-hour counts (REDIS-TS fix) instead of even-distribution approximations.
+ *
+ * <p>Both keys share the same TTL (refreshed on every write).
  */
 @Slf4j
 public final class RedisHotCounterSink extends RichSinkFunction<ShoppingEvent> {
@@ -64,16 +71,22 @@ public final class RedisHotCounterSink extends RichSinkFunction<ShoppingEvent> {
             return;
         }
 
-        String key   = "campaign:" + event.getTenantId() + ":" + event.getCampaignId();
-        String field = event.getEventType();
+        String hashKey = RedisKeySchema.hashKey(event.getTenantId(), event.getCampaignId());
+        String tsKey   = RedisKeySchema.timeSeriesKey(
+                event.getTenantId(), event.getCampaignId(), event.getEventType());
+        long   bucket  = RedisKeySchema.hourBucket(event.getEventTimestampMs());
 
         try (Jedis jedis = jedisPool.getResource()) {
-            jedis.hincrBy(key, field, 1L);
-            // Refresh TTL on every write to keep active campaigns hot.
-            jedis.expire(key, ttlSeconds);
+            // Aggregate counter (HGET used by resolveCount)
+            jedis.hincrBy(hashKey, event.getEventType(), 1L);
+            jedis.expire(hashKey, ttlSeconds);
+
+            // Per-hour time-series bucket (HGETALL used by resolveTimeSeries)
+            jedis.hincrBy(tsKey, String.valueOf(bucket), 1L);
+            jedis.expire(tsKey, ttlSeconds);
         } catch (Exception ex) {
-            // Non-fatal: log and continue — Pinot is the durable store.
-            log.warn("Redis HINCRBY failed for key={} field={}: {}", key, field, ex.getMessage());
+            log.warn("Redis write failed for hashKey={} tsKey={}: {}",
+                    hashKey, tsKey, ex.getMessage());
         }
     }
 
@@ -85,4 +98,3 @@ public final class RedisHotCounterSink extends RichSinkFunction<ShoppingEvent> {
         }
     }
 }
-

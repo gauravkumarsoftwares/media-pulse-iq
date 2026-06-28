@@ -10,6 +10,7 @@ import com.java.processing.sink.RedisHotCounterSink;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
@@ -87,7 +88,7 @@ public class FlinkStreamingJob {
      * calling thread until the job finishes or is cancelled (use a daemon thread).
      */
     public void execute() throws Exception {
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        StreamExecutionEnvironment env = buildEnvironment();
         env.setParallelism(flinkProperties.getParallelism());
 
         configureStateBackend(env);
@@ -168,6 +169,27 @@ public class FlinkStreamingJob {
     }
 
     // ---- Private helpers ---------------------------------------------------
+
+    /**
+     * Builds the {@link StreamExecutionEnvironment}, optionally wiring the
+     * Flink Prometheus metrics reporter (OB-3) when
+     * {@code platform.flink.prometheus-enabled=true}.
+     */
+    private StreamExecutionEnvironment buildEnvironment() {
+        if (!flinkProperties.isPrometheusEnabled()) {
+            return StreamExecutionEnvironment.getExecutionEnvironment();
+        }
+
+        Configuration flinkConf = new Configuration();
+        // Factory-class key is required in Flink 1.17+.
+        flinkConf.setString("metrics.reporter.prom.factory.class",
+                "org.apache.flink.metrics.prometheus.PrometheusReporterFactory");
+        // Port range accepted (e.g. "9249" or "9249-9259" for multi-task-manager).
+        flinkConf.setString("metrics.reporter.prom.port",
+                String.valueOf(flinkProperties.getPrometheusPort()));
+        log.info("Flink Prometheus reporter enabled on port {}", flinkProperties.getPrometheusPort());
+        return StreamExecutionEnvironment.getExecutionEnvironment(flinkConf);
+    }
 
     private void configureStateBackend(StreamExecutionEnvironment env) {
         if (flinkProperties.isUseRocksDb()) {

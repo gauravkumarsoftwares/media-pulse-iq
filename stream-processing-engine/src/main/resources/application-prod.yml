@@ -1,6 +1,30 @@
 spring:
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka-prod-msk:9094}
+    consumer:
+      enable-auto-commit: false
+      max-poll-records: 500
+      properties:
+        fetch.min.bytes: 1048576
+        fetch.max.wait.ms: 500
+        max.poll.interval.ms: 300000
+        heartbeat.interval.ms: 15000
+        session.timeout.ms: 45000
+    listener:
+      ack-mode: MANUAL_IMMEDIATE
+      concurrency: ${KAFKA_LISTENER_CONCURRENCY:64}   # match prod partition count (128 partitions / 2 replicas)
+    producer:
+      acks: all
+      retries: 2147483647
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        delivery.timeout.ms: 120000
+        request.timeout.ms: 30000
+        linger.ms: 10
+        batch.size: 65536
+        buffer.memory: 67108864
+        compression.type: lz4
     properties:
       security.protocol: ${KAFKA_SECURITY_PROTOCOL:SASL_SSL}
       sasl.mechanism: ${KAFKA_SASL_MECHANISM:SCRAM-SHA-512}
@@ -13,7 +37,10 @@ platform:
     parallelism: 64     # match prod Kafka partition count
     use-rocks-db: true
     checkpoint-interval-ms: 30000
-    checkpoint-dir: ${FLINK_CHECKPOINT_DIR:s3://media-pulse-iq-prod/flink-checkpoints}
+    checkpoint-dir: ${FLINK_CHECKPOINT_DIR:s3://event-analysis-prod/flink-checkpoints}
+    # OB-3: Flink Prometheus reporter on dedicated port
+    prometheus-enabled: true
+    prometheus-port: ${FLINK_PROMETHEUS_PORT:9249}
 
 logging:
   level:
@@ -32,3 +59,10 @@ management:
       show-details: never
       probes:
         enabled: true
+  # ---- OB-1: Distributed Tracing (prod) ----
+  tracing:
+    sampling:
+      probability: 0.1
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://otel-collector:4318/v1/traces}

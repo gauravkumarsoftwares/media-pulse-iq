@@ -41,10 +41,15 @@ public class IngestionServiceImpl implements IngestionService {
 
     @Override
     public IngestEventResponse ingest(IngestEventRequest request, String tenantId) {
+        log.debug("[SERVICE] ingest start tenant={} eventId={} eventType={}",
+                tenantId, request.eventId(), request.eventType());
+
         Timer.Sample sample = metrics.startTimer();
 
         // Per-tenant rate limiting (architecture 6.2 — noisy-neighbour protection)
         if (!rateLimiter.isAllowed(tenantId)) {
+            log.warn("[SERVICE] rate-limit exceeded tenant={} eventId={}",
+                    tenantId, request.eventId());
             metrics.stopTimer(sample, tenantId, "rate_limited");
             throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,
                     "Rate limit exceeded. Reduce request frequency.");
@@ -56,6 +61,8 @@ public class IngestionServiceImpl implements IngestionService {
         // Schema / business-rule validation (may route to DLQ).
         Optional<String> validationError = schemaValidator.validate(candidate);
         if (validationError.isPresent()) {
+            log.warn("[SERVICE] validation failed tenant={} eventId={} reason={}",
+                    tenantId, candidate.getEventId(), validationError.get());
             dlqProducer.sendToDlq(candidate, validationError.get());
             metrics.recordValidationFailure(tenantId, validationError.get());
             metrics.recordDlq(tenantId, validationError.get());
@@ -64,30 +71,35 @@ public class IngestionServiceImpl implements IngestionService {
         }
 
         eventProducer.publish(candidate);
+
         metrics.recordAccepted(tenantId, candidate.getEventType());
         metrics.stopTimer(sample, tenantId, "accepted");
+
+        long remaining = rateLimiter.remainingQuota(tenantId);
+        log.debug("[SERVICE] ingest completed tenant={} eventId={} remainingQuota={}",
+                tenantId, candidate.getEventId(), remaining);
 
         return new IngestEventResponse(
                 "ACCEPTED",
                 candidate.getEventId(),
                 Instant.now().toString(),
-                rateLimiter.remainingQuota(tenantId));
+                remaining);
     }
 
     // ---- mapping -----------------------------------------------------------
 
-    private static ShoppingEvent toEvent(IngestEventRequest r, String tenantId) {
+    private static ShoppingEvent toEvent(IngestEventRequest eventRequest, String tenantId) {
         return ShoppingEvent.builder()
-                .eventId(r.eventId())
+                .eventId(eventRequest.eventId())
                 .tenantId(tenantId)
-                .userId(r.userId())
-                .sessionId(r.sessionId())
-                .campaignId(r.campaignId())
-                .eventType(r.eventType())
-                .eventTimestampMs(r.eventTimestampMs() == 0
-                        ? System.currentTimeMillis() : r.eventTimestampMs())
-                .cost(r.cost())
-                .customTags(r.customTags())
+                .userId(eventRequest.userId())
+                .sessionId(eventRequest.sessionId())
+                .campaignId(eventRequest.campaignId())
+                .eventType(eventRequest.eventType())
+                .eventTimestampMs(eventRequest.eventTimestampMs() == 0
+                        ? System.currentTimeMillis() : eventRequest.eventTimestampMs())
+                .cost(eventRequest.cost())
+                .customTags(eventRequest.customTags())
                 .build();
     }
 }

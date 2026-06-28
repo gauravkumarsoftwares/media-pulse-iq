@@ -3,7 +3,7 @@ package com.java.query.controller;
 import com.java.query.common.ApiException;
 import com.java.query.dto.CampaignMetricResponse;
 import com.java.query.dto.TimeSeriesPoint;
-import com.java.query.security.PasetoProperties;
+import com.java.security.paseto.PasetoProperties;
 import com.java.query.service.InsightsService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

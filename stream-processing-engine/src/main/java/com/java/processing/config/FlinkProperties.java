@@ -84,5 +84,23 @@ public class FlinkProperties {
      * Confluent Cloud.
      */
     private String schemaRegistryUrl = "http://localhost:8081";
+
+    // ---- OB-3: Flink Prometheus Metrics Reporter ---------------------------------
+
+    /**
+     * Enable the Flink Prometheus reporter.
+     * When {@code true}, the {@link com.java.processing.job.FlinkStreamingJob} wires
+     * {@code flink-metrics-prometheus} so that Flink native metrics (checkpoint
+     * duration, backpressure ratio, watermark lag, operator throughput) are exposed
+     * on {@code prometheusPort} and scraped by the shared Prometheus instance.
+     */
+    private boolean prometheusEnabled = true;
+
+    /**
+     * Port on which the embedded Flink Prometheus reporter HTTP server listens.
+     * Must not clash with the Spring Boot management port (9090).
+     * Default 9249 matches the port declared in {@code deploy/prometheus/prometheus.yml}.
+     */
+    private int prometheusPort = 9249;
 }
 

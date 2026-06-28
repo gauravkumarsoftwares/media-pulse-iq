@@ -1,388 +1,422 @@
 # Real-Time Streaming Insight Platform
 
-> **A multi-tenant, real-time streaming analytics platform** for ad-network retailers.
-> Ingests billions of ad-interaction events per day, processes them with stateful stream operators, and serves sub-second campaign metric queries across a three-tier storage hierarchy.
->
-> **Status:** Current implementation · **SDD version:** 1.0 · **Last updated:** 2026-06-26
+
+Real-Time Streaming Analytics Platform is a production-grade, cloud-native, multi-tenant analytics system inspired by large-scale retail advertising platforms such as Amazon Ads, Flipkart Ads, and Walmart Connect. It demonstrates how modern event-driven architectures process massive volumes of user interaction data to generate real-time business insights.
+
+The platform ingests high-velocity clickstream and ad engagement events, performs stateful click-to-basket attribution using distributed stream processing, incrementally materializes campaign metrics into an OLAP store, and exposes secure, low-latency REST APIs for real-time analytics and reporting.
+
+Designed with scalability, resilience, and extensibility in mind, the project showcases industry-standard architectural patterns, including event-driven microservices, distributed messaging, stream processing, exactly-once semantics, real-time aggregation, and cloud-native deployment. It serves as a reference implementation for building enterprise-scale streaming data platforms capable of handling millions of events with low latency and high reliability.
+
+>  Full system design: [`docs/SDD.md`](docs/SDD.md)
 
 ---
 
 ## Table of Contents
 
-- [Platform Overview](#platform-overview)
-- [Architecture at a Glance](#architecture-at-a-glance)
-- [Modules](#modules)
-- [Data Flow](#data-flow)
-    - [Write Path](#write-path)
-    - [Read Path](#read-path)
-    - [Reconciliation Path](#reconciliation-path)
-- [Kafka Topic Conventions](#kafka-topic-conventions)
-- [Security Model](#security-model)
-- [Observability](#observability)
-- [Performance Targets](#performance-targets)
-- [Repository Layout](#repository-layout)
-- [Getting Started](#getting-started)
-- [Building the Platform](#building-the-platform)
-- [Related Documentation](#related-documentation)
+- [1. Overview](#1-overview)
+- [2. Architecture at a Glance](#2-architecture-at-a-glance)
+- [3. Monorepo Layout](#3-monorepo-layout)
+- [4. Modules & Responsibilities](#4-modules--responsibilities)
+- [5. Tech Stack](#5-tech-stack)
+- [6. Prerequisites](#6-prerequisites)
+- [7. Build](#7-build)
+- [8. Run Locally (Docker Compose)](#8-run-locally-docker-compose)
+- [9. Run Services Individually](#9-run-services-individually)
+- [10. API Reference](#10-api-reference)
+- [11. End-to-End Walkthrough](#11-end-to-end-walkthrough)
+- [12. Configuration & Environments](#12-configuration--environments)
+- [13. Kubernetes Deployment](#13-kubernetes-deployment)
+- [14. Testing](#14-testing)
+- [15. Troubleshooting](#15-troubleshooting)
+- [16. Related Documentation](#16-related-documentation)
 
 ---
 
-## Platform Overview
+## 1. Overview
 
-This monorepo implements a **CQRS + Lambda hybrid** platform with fully separated write and read paths, an exactly-once stateful stream core (Apache Flink), and a periodic reconciliation layer for financial accuracy.
+The platform is split along **CQRS** lines: a write path that absorbs traffic spikes, a stream path that does stateful processing, and a read path optimized for fast dashboard queries.
 
-**Core capabilities:**
-
-| Capability | Target |
-|:-----------|:-------|
-| Sustained ingest throughput | 150 K events/sec |
-| Peak throughput (Black Friday) | 5 M events/sec |
-| End-to-end freshness (P99) | < 3 seconds |
-| Campaign query latency — Redis tier (P99) | < 7.5 ms |
-| Campaign query latency — Pinot tier (P99) | < 85 ms |
-| Daily event volume | ~13 billion events |
-| Concurrent API requests | 25 000 |
+| Capability | How it's delivered |
+| :--- | :--- |
+| High-velocity ingestion | Stateless `ingestion-service` → Kafka, partitioned by `tenant_id + session_id` |
+| Deduplication | TTL-bounded keyed map in the stream engine (Flink-style) |
+| Click-to-basket attribution | Sessionized stateful join within a configurable window (default 24h) |
+| Low-latency insights | Pre-aggregated OLAP store (Apache Pinot Star-Tree; in-memory stand-in locally) |
+| Multi-tenancy | In-service PASETO `v4.public` verification + `X-Tenant-Context` enforced at write and read controllers |
+| Per-env config | Spring Profiles + Kustomize overlays (local / dev / staging / prod) |
 
 ---
 
-## Architecture at a Glance
+## 2. Architecture at a Glance
 
 ```
-Client / SDK  ──HTTPS + PASETO v4.public──►  Kong API Gateway
-                                                    │
-                              verifies Ed25519 signature,
-                              mints v4.local internal token,
-                              injects X-Internal-Token + X-Tenant-Context
-                                                    │
-                    ┌───────────────────────────────┼───────────────────────────────┐
-                    │           WRITE PATH           │            READ PATH           │
-                    │                                │                                │
-                    ▼                                │                 ▼              │
-            ingestion-service                        │    insights-query-service      │
-          (Spring Boot, port 8080)                   │   (Spring Boot, port 8080)     │
-                    │                                │          │  │  │               │
-          Avro-serialized ShoppingEvent              │     Redis Pinot Trino/Iceberg  │
-                    │                                └───────────────────────────────┘
-                    ▼
-           Kafka — Raw Topic
-                    │
-                    ▼
-     stream-processing-engine (Flink 1.19)
-       ├── DeduplicationFunction  (RocksDB, 60-min TTL)
-       ├── AttributionJoinFunction (24-h session window)
-       └── Sinks:
-             ├── Redis  (HINCRBY counters, hot < 48h)
-             ├── Kafka Enriched Topic → Apache Pinot (warm < 30d)
-             └── Iceberg / S3 (cold > 30d)
-
-Shared libraries:  shared-model · shared-security
+ Clients/SDKs
+     │  HTTP JSON (+ X-Tenant-Context)
+     ▼
+┌─────────────────────┐   produce (key = tenant:session)   ┌───────────────────────────┐
+│  ingestion-service  │ ─────────────────────────────────► │  Kafka: events.shopping.raw│
+│  (Write / Command)  │                                    └─────────────┬─────────────┘
+└─────────────────────┘                                                  │ consume
+                                                                         ▼
+                                          ┌─────────────────────────────────────────────┐
+                                          │           stream-processing-engine          │
+                                          │  deduplicate → sessionize → click↔basket join│
+                                          └─────────────┬───────────────────────────────┘
+                                                        │ produce enriched + conversions
+                                                        ▼
+                                          ┌───────────────────────────────────────────┐
+                                          │       Kafka: events.shopping.aggregates    │
+                                          └─────────────┬─────────────────────────────┘
+                                                        │ consume → index
+                                                        ▼
+ Marketers ──GET /ad/{id}/…──►  ┌─────────────────────────────────────┐
+                                │        insights-query-service        │
+                                │  StarTree store → CQRS read APIs     │
+                                └─────────────────────────────────────┘
 ```
+
+> In production the stream engine sinks to **Apache Pinot** + **Redis**; locally the `insights-query-service` consumes the `aggregates` topic into an in-memory Star-Tree store so the full loop runs without external OLAP infra.
 
 ---
 
-## Modules
-
-| Module | Role | README |
-|:-------|:-----|:-------|
-| **`ingestion-service`** | CQRS write path — HTTP gateway, PASETO auth, rate limiting, schema validation, Kafka publish | [ingestion-service/README.md](ingestion-service/README.md) |
-| **`stream-processing-engine`** | Apache Flink job — deduplication, sessionized attribution, multi-sink fan-out | [stream-processing-engine/README.md](stream-processing-engine/README.md) |
-| **`insights-query-service`** | CQRS read path — tiered query routing (Redis → Pinot → Trino), reconciliation jobs | [insights-query-service/README.md](insights-query-service/README.md) |
-| **`shared-model`** | Shared library — `ShoppingEvent` domain object, Avro SerDes, Kafka topic constants | [shared-model/README.md](shared-model/README.md) |
-| **`shared-security`** | Shared library — PASETO v4.local / v4.public token utilities, filter base classes | [shared-security/README.md](shared-security/README.md) |
-
-### ingestion-service
-
-The public-facing HTTP gateway that accepts ad-interaction events. It runs the entire ingest pipeline — PASETO token verification, per-tenant Redis rate limiting, schema validation, and Avro-serialized publish to the Kafka raw topic. Invalid events are routed to a dead-letter topic for SRE replay rather than dropped.
-
-Key design choices: thin controller + `IngestionService` interface; `GlobalExceptionHandler` for a consistent `ApiErrorResponse` envelope; fail-closed startup guard that refuses to launch when the PASETO key is missing in staging/prod.
-
-### stream-processing-engine
-
-The Apache Flink 1.19 stateful streaming job that consumes the raw Kafka topic and drives all downstream storage. It provides:
-
-- **Deduplication** — `keyBy(eventId)` with RocksDB state and a 60-minute TTL, covering all SDK retry windows.
-- **Attribution join** — `keyBy(sessionId)` with a 24-hour processing-time timer; synthesizes `CLICK_TO_BASKET` events when a `CLICK` is followed by an `ADD_TO_CART` within the same session.
-- **Multi-sink fan-out** — Redis `HINCRBY` counters for hot queries, Kafka enriched topic for Pinot real-time ingestion, and Iceberg/S3 for cold archival.
-
-Checkpoints are written to S3 every 30 seconds (incremental RocksDB), making the job safe on Spot/Preemptible instances.
-
-### insights-query-service
-
-The read-serving layer with tiered query routing:
-
-| Tier | Store | Data age | P99 latency |
-|:-----|:------|:---------|:------------|
-| Hot | Redis `HGET` | < 48 h | < 7.5 ms |
-| Warm | Apache Pinot (`COUNT*`) | < 30 d | < 85 ms |
-| Cold | Trino over Iceberg/S3 | > 30 d | < 4.2 s |
-
-Also hosts the `ReconciliationJob` — an hourly Redis-vs-Pinot drift check (auto-patches under-counts) and a daily Pinot-vs-Iceberg financial accuracy audit.
-
-### shared-model
-
-Plain-Java library with no Spring dependency. The single source of truth for:
-
-- `ShoppingEvent` — the domain object flowing through every stage of the pipeline.
-- `EventType` enum — with a null-safe, case-insensitive `EventType.from()` parser.
-- Confluent Avro SerDes — schema defined as a `["null", "string"]`-union schema for forward-compatible evolution.
-- `KafkaTopics` — topic and consumer-group name templates with a `resolve(env)` utility; prevents topic-name drift across services.
-
-### shared-security
-
-Shared PASETO utilities used by `ingestion-service` and `insights-query-service`. Provides the `PasetoAuthenticationFilter` base class, `PasetoProperties` binding, and the fail-closed `PasetoSecurityConfig` startup guard.
-
----
-
-## Data Flow
-
-### Write Path
+## 3. Monorepo Layout
 
 ```
-Client SDK
-  │  HTTPS POST /api/v1/events + PASETO v4.public
-  ▼
-Kong Gateway  →  verify Ed25519, mint v4.local, inject headers
-  ▼
-ingestion-service
-  ├── PasetoAuthFilter    verify v4.local, enforce write:events scope
-  ├── TenantContextFilter header presence check
-  ├── TenantRateLimiter   Redis sliding window (500 TPS default)
-  ├── SchemaValidator     eventId/userId/sessionId + EventType whitelist
-  └── EventProducer       Avro-serialized ShoppingEvent → Kafka Raw Topic
-                                │
-                                ▼
-                    stream-processing-engine (Flink)
-                      ├── DeduplicationFunction → drops replays
-                      ├── Redis HINCRBY          → hot counters
-                      ├── Kafka Enriched Topic   → Pinot real-time
-                      └── AttributionJoinFunction → CLICK_TO_BASKET events
-```
-
-### Read Path
-
-```
-Marketer / Dashboard
-  │  GET /api/v1/campaigns/{id}/clicks?from=...&grain=hour
-  ▼
-Kong Gateway  →  verify v4.public, mint v4.local
-  ▼
-insights-query-service
-  ├── PasetoAuthFilter        enforce read:ads scope
-  ├── Campaign allow-list     enforced from allowed_campaigns JWT claim
-  └── TierRoutingEngine
-        ├── < 48h   → Redis  HGET campaign:{tenantId}:{campaignId}
-        ├── < 30d   → Pinot  SELECT COUNT(*) WHERE tenant_id=? AND campaign_id=?
-        └── > 30d   → Trino  JDBC over Iceberg/S3 Parquet partitions
-```
-
-### Reconciliation Path
-
-| Job | Schedule | What it compares | Auto-action |
-|:----|:---------|:----------------|:------------|
-| Hourly | `0 5 * * * *` | Redis counters vs Pinot, last 2 h | Auto-patch `HINCRBY` for under-counts; warn-only for over-counts |
-| Daily | `0 15 1 * * *` | Pinot vs Iceberg, previous UTC day | Alert if drift > 0.01%; store `ReconciliationReport` |
-
-SRE can trigger an on-demand run via `POST /api/v1/reconciliation/runs/hourly`.
-
----
-
-## Kafka Topic Conventions
-
-All topic names follow the template:
-
-```
-{env}.{visibility}.{topic-type}.{domain}.{subdomain}.{record-name}-by-{key-name}[-v{N}]
-```
-
-| Topic | Resolved example (prod) | Producer | Consumer |
-|:------|:------------------------|:---------|:---------|
-| Raw | `prod.shared.event.ads.clickstream.ad-interaction-received-by-tenant-session` | `ingestion-service` | Flink job |
-| DLQ | `prod.internal.event.ads.clickstream.ad-interaction-failed-by-tenant-id` | `ingestion-service` | SRE tooling |
-| Enriched | `prod.internal.event.ads.attribution.ad-interaction-enriched-by-campaign` | Flink job | Pinot + `insights-query-service` |
-| Reconciliation corrections | `prod.internal.command.ads.reconciliation.counter-correction-by-campaign` | reconciliation job | SRE replay tooling |
-
-> Never hardcode topic names. Use Spring property placeholders (`${platform.kafka.topic.raw}`). The `{env}` segment is injected at runtime via `KAFKA_ENV`.
-
----
-
-## Security Model
-
-The platform uses **edge-validated PASETO with internal token re-minting (Option C)**:
-
-```
-External v4.public token  →  Kong verifies Ed25519 signature
-                          →  Mints short-lived v4.local internal token (60 s TTL)
-                          →  Forwards X-Internal-Token + X-Tenant-Context
-
-In each microservice:
-  PasetoAuthenticationFilter (@Order 0)
-    └─ verifies v4.local with shared symmetric key
-    └─ enforces required scope (write:events or read:ads)
-    └─ rewrites X-Tenant-Context from verified claims — never trusts request body
-  TenantContextFilter (@Order 1)
-    └─ defense-in-depth: rejects any request missing the tenant header
-```
-
-**Environment behaviour:**
-
-| Profile | PASETO enabled | Key source |
-|:--------|:--------------|:-----------|
-| `local` | No (pass-through) | — |
-| `staging` / `prod` | Yes | `PASETO_LOCAL_KEY` (K8s Secret) |
-
-The service **refuses to start** if `PASETO_LOCAL_KEY` is absent when auth is enabled (fail-closed guard).
-
-Multi-tenant isolation is enforced at every layer: `tenantId` is extracted from the verified token (never the request body), Redis keys are namespaced `campaign:{tenantId}:{campaignId}`, Pinot queries inject `AND tenant_id = ?` as an RLS predicate, and Iceberg data is S3-partitioned by `tenant_id` for sovereignty.
-
----
-
-## Observability
-
-All services expose Micrometer metrics on the actuator port (`9090`) at `/actuator/prometheus`.
-
-**SLOs:**
-
-| SLI | SLO Target | Alert threshold |
-|:----|:-----------|:----------------|
-| Ingress availability | > 99.99% | 5xx rate > 0.1% |
-| End-to-end freshness (P95) | < 3.0 s | P95 > 10 s |
-| Read API latency (P95) | < 200 ms | P95 > 500 ms for 3 min |
-| Data correctness drift (daily) | 0.00% | > 0.05% |
-| Flink consumer lag | < 100 K messages | > 500 K messages |
-
-**Key metrics by service:**
-
-| Service | Metric |
-|:--------|:-------|
-| `ingestion-service` | `ads.ingest.events.accepted`, `ads.ingest.events.dlq`, `ads.ingest.rate.limited`, `ads.ingest.latency.ms` |
-| `stream-processing-engine` | `ads.events.processed`, `ads.events.dedup.dropped`, `ads.events.attributed`, `flink.checkpoint.duration`, `flink.consumer.lag` |
-| `insights-query-service` | `ads.queries.latency.ms`, `ads.cache.hits`, `ads.tier.redis.count`, `ads.tier.pinot.count`, `ads.tier.trino.count` |
-| Reconciliation | `ads.reconciliation.discrepancies`, `ads.reconciliation.auto.patches`, `ads.reconciliation.campaigns.checked` |
-
----
-
-## Performance Targets
-
-### Auto-scaling
-
-| Component | Min pods | Max pods | Scale trigger |
-|:----------|:---------|:---------|:--------------|
-| `ingestion-service` | 10 | 300 | CPU > 75% |
-| `insights-query-service` | 3 | 50 | CPU > 70% |
-| Flink `maxParallelism` | — | 1024 | TaskManager arrival (S3 checkpoint restore) |
-| Kafka partitions (per topic) | 128 | 128 | Fixed; bounds Flink parallelism |
-
-### Flink fault tolerance
-
-Checkpoints every 30 seconds to S3 (incremental RocksDB). On TaskManager failure or Spot reclaim: restore from latest checkpoint, replay Kafka from checkpointed offset, `DeduplicationFunction` drops re-delivered events. Exactly-once guaranteed via Kafka transactional sink committed inside the checkpoint barrier.
-
----
-
-## Repository Layout
-
-```
-/
-├── ingestion-service/          # Spring Boot — CQRS write path
-├── stream-processing-engine/   # Apache Flink 1.19 job
-├── insights-query-service/     # Spring Boot — CQRS read path + reconciliation
-├── shared-model/               # Plain-Java — ShoppingEvent, Avro SerDes, KafkaTopics
-├── shared-security/            # Plain-Java — PASETO filters and config
-├── deploy/
-│   ├── docker-compose.yml      # Local Kafka, Redis, Schema Registry, Pinot
-│   └── k8s/                    # Helm charts and K8s manifests
+media-pulse-iq/                       # Maven parent POM (packaging: pom)
+├── pom.xml
+├── README.md                         # This file
+│
 ├── docs/
-│   ├── SDD.md                  # System Design Document (full LLD + HLD)
-│   ├── AUTHENTICATION.md       # PASETO Option-C token exchange detail
-│   ├── architecture.md         # Diagrams and ADRs
-│   └── implementation-details.md
-└── pom.xml                     # Parent Maven BOM
+│   └── SDD.md                        # System design
+│   └── AUTHENTICATION.md             # Authentication Details
+│
+├── shared-model/                     # Shared contracts (DTOs, enums, topic constants, Redis key schema)
+│   └── src/main/java/com/java/model/
+│       ├── ShoppingEvent.java
+│       ├── EventType.java
+│       ├── constants/KafkaTopics.java
+│       └── redis/RedisKeySchema.java  # Canonical Redis key/field patterns (shared between write and read paths)
+│
+├── shared-security/                  # Security library (PASETO crypto, shared filter base, PII utilities)
+│   └── src/main/java/com/java/security/
+│       ├── paseto/
+│       │   ├── AbstractPasetoAuthenticationFilter.java  # Base OncePerRequestFilter: verify, scope, audit, tenant rewrite
+│       │   ├── PasetoProperties.java                    # Shared @ConfigurationProperties (auto-configured)
+│       │   ├── PasetoSecurityConfig.java                # Spring Boot auto-configuration: PasetoVerifier + key guard
+│       │   ├── PasetoVerifier.java / PasetoClaims.java
+│       │   ├── PasetoV4PublicVerifier.java / PasetoV4LocalVerifier.java
+│       │   └── PasetoV4Local.java / PasetoV4LocalIssuer.java / …
+│       └── pii/PiiMasker.java
+│
+├── ingestion-service/                # Write path (REST → Kafka)
+│   ├── Dockerfile
+│   └── src/main/java/com/java/ingestion/
+│       ├── IngestionApplication.java
+│       ├── config/
+│       │   ├── KafkaProducerConfig.java
+│       │   └── RequestLoggingFilterConfig.java         # CommonsRequestLoggingFilter (DEBUG-gated access log)
+│       ├── controller/IngestController.java
+│       ├── producer/EventProducer.java + DlqProducer.java
+│       ├── ratelimit/TenantRateLimiter.java
+│       ├── security/
+│       │   ├── PasetoAuthenticationFilter.java         # Thin subclass: declares write:events scope
+│       │   └── TenantContextFilter.java
+│       ├── service/IngestionService.java + IngestionServiceImpl.java
+│       └── validation/SchemaValidator.java
+│
+├── stream-processing-engine/         # Stream path (Kafka consumer + stateful join)
+│   ├── Dockerfile
+│   └── src/main/java/com/java/processing/
+│       ├── ProcessingApplication.java
+│       ├── consumer/EventConsumer.java
+│       ├── job/FlinkStreamingJob.java
+│       ├── operator/DeduplicationFunction.java + AttributionJoinFunction.java + SerDes
+│       ├── sink/
+│       │   ├── RedisHotCounterSink.java                # Uses RedisKeySchema from shared-model
+│       │   ├── KafkaSink / IcebergS3Sink / PinotSink
+│       └── config/FlinkJobLauncher.java + FlinkProperties.java
+│
+├── insights-query-service/           # Read path (CQRS REST APIs)
+│   ├── Dockerfile
+│   └── src/main/java/com/java/query/
+│       ├── QueryApplication.java
+│       ├── controller/AdInsightsController.java
+│       ├── handler/
+│       │   ├── TierQueryHandler.java                   # Strategy interface per serving tier
+│       │   ├── RedisCacheTierHandler.java              # Hot tier — uses RedisKeySchema
+│       │   ├── PinotOlapTierHandler.java               # Warm tier — Pinot native SDK
+│       │   ├── StarTreeFallbackResolver.java           # In-memory fallback (local/dev)
+│       │   └── TrinoLakehouseTierHandler.java          # Cold tier — Trino JDBC / Iceberg
+│       ├── observability/
+│       │   ├── QueryMetricsAspect.java                 # AOP @TieredQuery instrumentation
+│       │   ├── TierQueryContext.java                   # ThreadLocal tier context for AOP
+│       │   └── TieredQuery.java                        # Method annotation
+│       ├── reconciliation/
+│       │   ├── ReconciliationStrategy.java             # Strategy interface
+│       │   ├── HourlyReconciliationStrategy.java       # Redis vs Pinot
+│       │   ├── DailyReconciliationStrategy.java        # Pinot vs Iceberg
+│       │   └── ReconciliationJob.java / ReconciliationStore.java
+│       ├── router/TierRoutingEngine.java + TierRoutingProperties.java
+│       ├── security/PasetoAuthenticationFilter.java    # Thin subclass: declares read:ads scope
+│       ├── service/InsightsServiceImpl.java + TieredInsightsEngine.java + InsightsRequestValidator.java
+│       └── store/RedisInsightsStore.java + PinotRestClient.java + TrinoIcebergClient.java
+│
+├── deploy/
+│   ├── docker-compose.yml            # Local full stack
+│   ├── config/                       # Reference per-env Spring config templates
+│   └── k8s/
+│       ├── base/                     # Deployments, Services, HPA/KEDA
+│       └── overlays/{dev,staging,prod}/   # Kustomize overlays + configmap.env
+│
+└── docs/
+    ├── AUTHENTICATION.md              # Auth model: edge-validated PASETO + in-service verify-everywhere
+    ├── SECURITY-OWASP.md              # OWASP Top 10 risk analysis + remediation status
+    └── postman_collection.json
 ```
+
+Each service also ships `application.yml` + `application-{local,dev,staging,prod}.yml` under `src/main/resources/`.
 
 ---
 
-## Getting Started
+## 4. Modules & Responsibilities
 
-**Prerequisites:** Java 21, Maven 3.9+, Docker (for local dependencies).
+| Module | Type | Port | Responsibility |
+| :--- | :--- | :--- | :--- |
+| **shared-model** | Library JAR | – | `ShoppingEvent` schema, `EventType`, `KafkaTopics` constants, `RedisKeySchema` (DRY across services) |
+| **shared-security** | Library JAR (Spring Boot auto-config) | – | PASETO crypto primitives, `AbstractPasetoAuthenticationFilter` base class, `PasetoProperties` + `PasetoSecurityConfig` auto-configuration, `PiiMasker` |
+| **ingestion-service** | Spring Boot REST + Kafka producer | `8080` | Validates payload, enforces tenant context (`write:events`), rate-limits per tenant, publishes to `events.shopping.raw` keyed by `tenant:session` |
+| **stream-processing-engine** | Spring Boot Kafka consumer | `8082` | Dedup → sessionized click→basket join → emits enriched events to `events.shopping.aggregates`; writes Redis hot-counters via `RedisKeySchema` |
+| **insights-query-service** | Spring Boot REST + Kafka consumer | `8083` | Indexes aggregates into tiered store (Redis / Pinot / Trino-Iceberg); serves clicks / impressions / clickToBasket APIs with tier-routing strategy pattern |
+
+---
+
+## 5. Tech Stack
+
+| Concern | Technology |
+| :--- | :--- |
+| Language / Runtime | Java 21 |
+| Framework | Spring Boot 3.5.x (Web, Actuator), Spring Kafka |
+| Boilerplate | Lombok (getters/setters/builders, constructor injection, `@Slf4j`) |
+| Messaging | Apache Kafka |
+| Serving (prod) | Apache Pinot (Star-Tree OLAP), Redis cache, Trino + Iceberg for cold data |
+| Build | Maven (multi-module) |
+| Containers | Docker (multi-stage), Docker Compose |
+| Orchestration | Kubernetes + Kustomize, HPA + KEDA autoscaling |
+| Testing | JUnit 5, Spring MockMvc |
+
+---
+
+## 6. Prerequisites
+
+- **JDK 21+**
+- **Maven 3.9+**
+- **Docker + Docker Compose** (for the local full stack)
+- **kubectl + a cluster** (optional, for K8s deployment)
+
+---
+
+## 7. Build
+
+Build all modules from the repository root:
 
 ```bash
-# 1. Start local infrastructure (Kafka, Redis, Schema Registry)
+mvn clean install
+```
+
+Build a single module (and its dependencies):
+
+```bash
+mvn -pl ingestion-service -am clean package
+```
+
+> ℹ️ The build resolves Spring Boot from Maven Central. On a restricted network, point Maven at an accessible mirror (or set `<offline>` in `~/.m2/settings.xml` once the dependency closure is cached).
+
+---
+
+## 8. Run Locally (Docker Compose)
+
+Bring up Kafka and all three services with the `local` profile:
+
+```bash
 cd deploy
-docker-compose up -d kafka redis schema-registry
+docker compose up --build
+```
 
-# 2. Build shared libraries first (required by services)
-mvn -pl shared-model,shared-security install -DskipTests
+Exposed ports:
 
-# 3. Run ingestion-service (write path)
-mvn -pl ingestion-service spring-boot:run -Dspring-boot.run.profiles=local
+| Service | URL |
+| :--- | :--- |
+| ingestion-service | http://localhost:8081 (container 8080) |
+| stream-processing-engine | http://localhost:8082 |
+| insights-query-service | http://localhost:8083 |
 
-# 4. Run insights-query-service (read path)
-mvn -pl insights-query-service spring-boot:run -Dspring-boot.run.profiles=local
+---
 
-# 5. Submit the Flink job (stream processing)
-# See stream-processing-engine/README.md for Flink cluster setup
+## 9. Run Services Individually
 
-# 6. Send a test event
-curl -s -X POST http://localhost:8080/api/v1/events \
-  -H 'Content-Type: application/json' \
-  -H 'X-Tenant-Context: walmart_us' \
+Each service is a standalone Spring Boot app. Start Kafka first (e.g. via the compose file), then:
+
+```bash
+mvn -pl ingestion-service        spring-boot:run -Dspring-boot.run.profiles=local
+mvn -pl stream-processing-engine spring-boot:run -Dspring-boot.run.profiles=local
+mvn -pl insights-query-service   spring-boot:run -Dspring-boot.run.profiles=local
+```
+
+---
+
+## 10. API Reference
+
+All endpoints require the `X-Tenant-Context` header (injected by the gateway after PASETO validation; when `platform.security.paseto.enabled=true` each service also re-verifies the token itself and derives the tenant from the verified claims). Requests without a valid identity return **401**. See [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md) for the full model.
+
+### Ingest an event — `POST /v1/events/ingest` (ingestion-service)
+
+```bash
+curl -X POST http://localhost:8081/v1/events/ingest \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-Context: walmart_us" \
   -d '{
-    "eventId":   "e1",
-    "userId":    "u1",
-    "sessionId": "s1",
-    "campaignId":"cmp_spring_99a",
-    "eventType": "CLICK"
+    "eventId": "evt_click_1",
+    "userId": "user_a",
+    "sessionId": "sess_a",
+    "campaignId": "spring_sale_2026",
+    "eventType": "CLICK",
+    "cost": 0.45
   }'
-# → 202 Accepted {"status":"ACCEPTED","eventId":"e1","remainingQuota":499}
 ```
+Response: `202 Accepted` with `{ "status": "ACCEPTED", "eventId": "...", "processedTimestamp": "..." }`.
 
-**Actuator endpoints** (port `9090`, internal cluster only):
+Supported `eventType` values: `IMPRESSION`, `CLICK`, `PRODUCT_VIEW`, `ADD_TO_CART`, `PURCHASE`.
+
+### Campaign insights (insights-query-service, port 8083)
+
+| Method & Path | Description |
+| :--- | :--- |
+| `GET /ad/{campaignID}/clicks` | Click count for a campaign |
+| `GET /ad/{campaignID}/impressions` | Impression count for a campaign |
+| `GET /ad/{campaignID}/clickToBasket` | Attributed click→basket conversions |
+
+Common query params: `from`, `to` (ISO-8601), `grain` (`minute|hour|day`).
 
 ```bash
-curl http://localhost:9090/actuator/health      # liveness probe
-curl http://localhost:9090/actuator/prometheus  # Prometheus metrics scrape
+curl "http://localhost:8083/ad/spring_sale_2026/clicks?grain=hour" \
+  -H "X-Tenant-Context: walmart_us"
 ```
 
-**API docs** (per service, port `8080`):
-
+Example response:
+```json
+{
+  "tenantId": "walmart_us",
+  "campaignId": "spring_sale_2026",
+  "metric": "click",
+  "from": "2026-06-24T10:00:00Z",
+  "to": "2026-06-24T12:00:00Z",
+  "grain": "hour",
+  "series": [{ "timestamp": "2026-06-24T12:00:00Z", "value": 1 }],
+  "total": 1,
+  "source": "ApachePinot"
+}
 ```
-http://localhost:8080/swagger-ui.html
-http://localhost:8080/v3/api-docs
+
+> A ready-to-import Postman collection lives at [`docs/postman_collection.json`](docs/postman_collection.json).
+
+---
+
+## 11. End-to-End Walkthrough
+
+With the local stack running, post a `CLICK` and then an `ADD_TO_CART` on the **same `sessionId`** to trigger an attributed conversion:
+
+```bash
+BASE_ING=http://localhost:8081
+BASE_QRY=http://localhost:8083
+H='-H Content-Type:application/json -H X-Tenant-Context:walmart_us'
+
+# 1) Ad click
+curl -X POST $BASE_ING/v1/events/ingest $H \
+  -d '{"eventId":"e1","userId":"u1","sessionId":"s1","campaignId":"cmp1","eventType":"CLICK","cost":0.5}'
+
+# 2) Add to cart (same session, within attribution window)
+curl -X POST $BASE_ING/v1/events/ingest $H \
+  -d '{"eventId":"e2","userId":"u1","sessionId":"s1","eventType":"ADD_TO_CART"}'
+
+# 3) Read back the conversion
+curl "$BASE_QRY/ad/cmp1/clickToBasket?grain=hour" -H "X-Tenant-Context: walmart_us"
+# → total: 1  (the stream engine attributed the basket add to the prior click)
 ```
 
 ---
 
-## Building the Platform
+## 12. Configuration & Environments
+
+Built once, promoted everywhere — behaviour changes only via configuration. See [`implementation-details.md` 10](implementation-details.md#10-environment-configuration-management-local--dev--staging--prod).
+
+| | local | dev | staging | prod |
+| :--- | :--- | :--- | :--- | :--- |
+| Profile | `local` | `dev` | `staging` | `prod` |
+| Kafka | `localhost:9092` | `kafka-dev:9092` | `kafka-staging:9092` | `kafka-prod-msk:9094` (TLS) |
+| Partitions | 1 | 6 | 64 | 128 |
+| Logging | `DEBUG` | `DEBUG` | `INFO` | `WARN` |
+
+Activate a profile:
 
 ```bash
-# Build everything in dependency order
-mvn install -DskipTests
-
-# Build and test a single module
-mvn -pl ingestion-service test
-mvn -pl shared-model install -DskipTests
-
-# Build Docker images
-docker build -t ingestion-service:latest ingestion-service/
-docker build -t insights-query-service:latest insights-query-service/
-docker build -t stream-processing-engine:latest stream-processing-engine/
+# Maven
+mvn -pl ingestion-service spring-boot:run -Dspring-boot.run.profiles=dev
+# Container / K8s
+SPRING_PROFILES_ACTIVE=prod
 ```
 
-### Module dependency order
-
-```
-shared-model  ──►  ingestion-service
-     │         └─► stream-processing-engine
-     │         └─► insights-query-service
-     │
-shared-security ─► ingestion-service
-               └─► insights-query-service
-```
-
-Always install `shared-model` and `shared-security` before building the service modules.
+Secrets are never committed — credentials are injected at runtime via K8s Secrets (External Secrets Operator / Vault / AWS Secrets Manager).
 
 ---
 
-## Related Documentation
+## 13. Kubernetes Deployment
+
+Manifests use **Kustomize** (`deploy/k8s/base` + per-env overlays). Each overlay generates an `app-config` ConfigMap from its `configmap.env` and sets the active profile/replicas.
+
+```bash
+# Dev
+kubectl apply -k deploy/k8s/overlays/dev
+# Staging
+kubectl apply -k deploy/k8s/overlays/staging
+# Prod
+kubectl apply -k deploy/k8s/overlays/prod
+```
+
+Autoscaling:
+- `ingestion-service` & `insights-query-service` → **HPA** (CPU).
+- `stream-processing-engine` → **KEDA** ScaledObject on Kafka consumer lag.
+
+---
+
+## 14. Testing
+
+Run the full test suite:
+
+```bash
+mvn test
+```
+
+Coverage highlights:
+- `stream-processing-engine`: `StatefulJoinerTest` (attribution window, double-attribution guard), `DeduplicatorTest` (TTL eviction).
+- `ingestion-service`: `IngestControllerTest` (401 without tenant, validation, async dispatch).
+- `insights-query-service`: `AdInsightsControllerTest` (tenant enforcement, response shape), `ReconciliationControllerTest` (paged reports, on-demand run), `ReconciliationJobTest` (hourly/daily strategies).
+- `shared-security`: `PasetoV4PublicVerifierTest`, `PasetoV4LocalVerifierTest`, `PiiMaskerTest` (pure unit tests).
+
+---
+
+## 15. Troubleshooting
+
+| Symptom | Likely cause / fix |
+| :--- | :--- |
+| `401 Unauthorized` on any call | Missing `X-Tenant-Context` header — add it to the request |
+| Conversion not counted | `CLICK` and `ADD_TO_CART` must share the same `sessionId` and fall within the attribution window |
+| Services can't reach Kafka locally | Ensure `docker compose up` is healthy; brokers advertise `kafka:9092` inside the compose network |
+| Maven can't download Spring Boot | Restricted network — use an accessible mirror or pre-populate `~/.m2` then build with `-o` (offline) |
+| Duplicate events inflating counts | Expected to be dropped by the deduplicator within its TTL window |
+
+---
+
+## 16. Related Documentation
 
 | Document | Location | Contents |
 |:---------|:---------|:---------|
@@ -393,3 +427,4 @@ Always install `shared-model` and `shared-security` before building the service 
 | insights-query-service | [`insights-query-service/README.md`](insights-query-service/README.md) | Query API reference, tier routing config, reconciliation API |
 | shared-model | [`shared-model/README.md`](shared-model/README.md) | `ShoppingEvent` field reference, Avro schema, topic catalogue |
 | shared-security | [`shared-security/README.md`](shared-security/README.md) | PASETO filter usage, config properties |
+

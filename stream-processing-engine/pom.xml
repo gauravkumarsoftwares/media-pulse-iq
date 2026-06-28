@@ -70,6 +70,30 @@
             <artifactId>jedis</artifactId>
         </dependency>
 
+        <!-- ===== Observability — Distributed Tracing (OB-1) ===== -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+
+        <!-- ===== Observability — Flink Prometheus Reporter (OB-3) ===== -->
+        <!-- Exposes Flink native operator metrics (checkpoint duration, backpressure,
+             watermark lag) on a dedicated HTTP port scraped by Prometheus. -->
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-metrics-prometheus</artifactId>
+        </dependency>
+
+        <!-- ===== Observability — Structured Log Aggregation (OB-5) ===== -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
@@ -86,4 +110,3 @@
         </plugins>
     </build>
 </project>
-

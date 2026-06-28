@@ -53,14 +53,14 @@ public class ReconciliationStore {
     public synchronized List<ReconciliationReport> findByWindow(
             ReconciliationWindow window, int limit) {
         Deque<ReconciliationReport> deque = store.get(window);
-        List<ReconciliationReport> all = new ArrayList<>(deque);
-        // Reverse to newest-first
-        List<ReconciliationReport> reversed = new ArrayList<>(all.size());
-        for (int i = all.size() - 1; i >= 0; i--) {
-            reversed.add(all.get(i));
-            if (limit > 0 && reversed.size() >= limit) break;
+        // C1: single-pass reverse iteration — no double-list copy
+        List<ReconciliationReport> result = new ArrayList<>();
+        var desc = deque.descendingIterator();
+        while (desc.hasNext()) {
+            result.add(desc.next());
+            if (limit > 0 && result.size() >= limit) break;
         }
-        return reversed;
+        return result;
     }
 
     /**

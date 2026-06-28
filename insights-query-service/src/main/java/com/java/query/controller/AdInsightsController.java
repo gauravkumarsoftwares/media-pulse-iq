@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -24,6 +25,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/v1/campaigns")
 @RequiredArgsConstructor
+@Slf4j
 @Tag(name = "Campaign Insights", description = "Campaign metric time-series and aggregates")
 public final class AdInsightsController {
 
@@ -90,13 +92,21 @@ public final class AdInsightsController {
             String campaignId, String metricType,
             String from, String to, String grain, String placement) {
 
+        log.info("[API] GET /api/v1/campaigns/{}/{} tenant={} grain={} from={} to={} placement={}",
+                campaignId, metricType.toLowerCase(), tenant, grain, from, to, placement);
+
         if (tenant == null || tenant.isBlank()) {
+            log.warn("[API] GET /api/v1/campaigns/{}/{} rejected — missing X-Tenant-Context header",
+                    campaignId, metricType.toLowerCase());
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
 
         // All validation, authorization, and querying in the service layer.
         CampaignMetricResponse response = insightsService.getMetrics(
                 tenant, claims, campaignId, metricType, from, to, grain, placement);
+        log.info("[API] GET /api/v1/campaigns/{}/{} completed tenant={} tier={} points={} total={}",
+                campaignId, metricType.toLowerCase(), tenant,
+                response.source(), response.series().size(), response.total());
         return ResponseEntity.ok(response);
     }
 }

@@ -1,44 +1,40 @@
 package com.java.query.service;
 
-import com.java.query.common.ApiException;
 import com.java.query.dto.CampaignMetricResponse;
 import com.java.query.dto.TimeSeriesPoint;
-import com.java.query.router.QueryTier;
+import com.java.query.observability.TierQueryContext;
 import com.java.query.router.TierRoutingEngine;
 import com.java.security.paseto.PasetoClaims;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.regex.Pattern;
 
 /**
  * Default {@link InsightsService} implementation.
  *
- * <p>Responsibilities (Single Responsibility sub-concerns):
+ * <p>Responsibilities after refactoring (B5/B6 SRP + A3 DRY + C2 KISS):
  * <ol>
- *   <li>Input allow-list validation (campaignId, placement, grain)</li>
- *   <li>Per-campaign authorization via {@code allowed_campaigns} claim</li>
- *   <li>Tier routing via {@link TierRoutingEngine}</li>
+ *   <li>Input validation + authorization → delegated to {@link InsightsRequestValidator}</li>
+ *   <li>Time-window parsing and defaulting (uses {@link QueryService#DEFAULT_HOT_WINDOW})</li>
  *   <li>Time-series query via {@link QueryService}</li>
- *   <li>DTO mapping — raw {@code Map<String,Object>} → typed records</li>
+ *   <li>DTO assembly (tier label comes from the query-service response field)</li>
  * </ol>
+ *
+ * <p>{@link TierRoutingEngine} is no longer injected here — the tier is an
+ * internal routing detail of {@link TieredInsightsEngine} and is surfaced to
+ * callers only via the {@code source} field of {@link CampaignMetricResponse}.
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class InsightsServiceImpl implements InsightsService {
 
-    // Input allow-list (OWASP A03/A04): safe charset + max length.
-    private static final Pattern ID_PATTERN   = Pattern.compile("[A-Za-z0-9_.:-]{1,128}");
-    private static final Set<String> VALID_GRAINS = Set.of("minute", "hour", "day");
-
-    private final QueryService      queryService;
-    private final TierRoutingEngine tierRoutingEngine;
+    private final QueryService              queryService;
+    private final InsightsRequestValidator  validator;
 
     @Override
     public CampaignMetricResponse getMetrics(
@@ -46,60 +42,52 @@ public class InsightsServiceImpl implements InsightsService {
             String campaignId, String metricType,
             String from, String to, String grain, String placement) {
 
-        // ---- Input validation -----------------------------------------------
-        if (!ID_PATTERN.matcher(campaignId).matches()) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "Invalid campaignId format.");
-        }
-        if (placement != null && !placement.isBlank() && !ID_PATTERN.matcher(placement).matches()) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "Invalid placement format.");
-        }
-        if (!VALID_GRAINS.contains(grain)) {
-            throw new ApiException(HttpStatus.BAD_REQUEST,
-                    "Invalid grain. Allowed: minute, hour, day.");
-        }
+        log.debug("[SERVICE] getMetrics start tenant={} campaign={} metric={} grain={} from={} to={}",
+                tenantId, campaignId, metricType, grain, from, to);
 
-        // ---- Per-campaign authorization (OWASP A01) -------------------------
-        if (claims != null && !claims.canAccessCampaign(campaignId)) {
-            throw new ApiException(HttpStatus.FORBIDDEN,
-                    "Not authorized for campaign: " + campaignId);
-        }
+        // ---- Validate + authorise (single responsibility) -------------------
+        validator.validate(tenantId, campaignId, grain, placement, claims);
 
-        // ---- Query ----------------------------------------------------------
-        Instant fromInstant = parseInstant(from);
-        Instant toInstant   = parseInstant(to);
-        String  toTs        = toInstant != null ? toInstant.toString() : Instant.now().toString();
+        // ---- Parse + default time window (C2 — uses shared constant) --------
+        Instant fromInstant   = parseInstant(from);
+        Instant toInstant     = parseInstant(to);
+        Instant effectiveTo   = (toInstant   != null) ? toInstant   : Instant.now();
+        Instant effectiveFrom = (fromInstant != null) ? fromInstant
+                : effectiveTo.minus(QueryService.DEFAULT_HOT_WINDOW);
 
-        QueryTier tier = tierRoutingEngine.resolveTier(fromInstant);
-
+        // ---- Query -----------------------------------------------------------
         long queryStartMs = System.currentTimeMillis();
-        List<Map<String, Object>> rawSeries = queryService.getTimeSeries(
-                tenantId, campaignId, metricType, fromInstant, toInstant, grain, placement);
+        List<TimeSeriesPoint> series = queryService.getTimeSeries(
+                tenantId, campaignId, metricType,
+                fromInstant, toInstant, grain, placement);
         long dataFreshnessMs = System.currentTimeMillis() - queryStartMs;
 
-        // ---- Mapping: raw Map → typed DTO records ---------------------------
-        List<TimeSeriesPoint> series = rawSeries.stream()
-                .map(p -> new TimeSeriesPoint(
-                        String.valueOf(p.get("timestamp")),
-                        ((Number) p.get("value")).longValue()))
-                .toList();
-
         long total = series.stream().mapToLong(TimeSeriesPoint::value).sum();
+
+        log.info("[SERVICE] getMetrics completed tenant={} campaign={} metric={} "
+                        + "points={} total={} queryMs={}",
+                tenantId, campaignId, metricType, series.size(), total, dataFreshnessMs);
 
         return new CampaignMetricResponse(
                 tenantId,
                 campaignId,
                 metricType.toLowerCase(),
-                from != null ? from : Instant.now().minusSeconds(7200).toString(),
-                toTs,
+                effectiveFrom.toString(),   // C2: always use parsed / defaulted instant
+                effectiveTo.toString(),
                 grain,
                 (placement != null && !placement.isBlank()) ? placement : null,
                 series,
                 total,
                 dataFreshnessMs,
-                tier.sourceLabel());
+                resolveSource());
     }
 
-    // ---- helpers ------------------------------------------------------------
+    /** Resolve tier label from the query-service context (read from TierQueryContext). */
+    private static String resolveSource() {
+        TierQueryContext.Context context =
+                TierQueryContext.current();
+        return context != null ? context.tierLabel() : "unknown";
+    }
 
     /** Null-safe ISO-8601 parse; invalid/empty input yields {@code null}. */
     private static Instant parseInstant(String value) {
@@ -111,4 +99,3 @@ public class InsightsServiceImpl implements InsightsService {
         }
     }
 }
-

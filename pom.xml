@@ -61,6 +61,12 @@
         <pinot.client.version>1.3.0</pinot.client.version>
         <!-- Trino JDBC: cold-tier federated queries over Iceberg/S3 Parquet (4.3) -->
         <trino.jdbc.version>455</trino.jdbc.version>
+        <!-- Micrometer Tracing — version aligned with Spring Boot 3.5.3 BOM -->
+        <micrometer-tracing.version>1.5.3</micrometer-tracing.version>
+        <!-- OpenTelemetry SDK — version driven by Spring Boot 3.5.3 BOM managed set -->
+        <opentelemetry.version>1.48.0</opentelemetry.version>
+        <!-- Logstash Logback Encoder — structured JSON logs for Loki/ELK aggregation -->
+        <logstash-logback-encoder.version>8.1</logstash-logback-encoder.version>
     </properties>
 
     <build>
@@ -81,40 +87,40 @@
                     <artifactId>maven-jar-plugin</artifactId>
                     <version>${maven-jar-plugin.version}</version>
                 </plugin>
-            <!-- Keep Lombok out of the repackaged Spring Boot fat jars (compile-time only). -->
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-                <configuration>
-                    <excludes>
-                        <exclude>
-                            <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok</artifactId>
-                        </exclude>
-                    </excludes>
-                </configuration>
-            </plugin>
-            <!--
-              Explicitly register Lombok as an annotation processor path.
-              This is required when third-party compile-time dependencies (avro-compiler,
-              kafka-avro-serializer) are present on the classpath: Maven compiler 3.x
-              respects annotationProcessorPaths over automatic classpath discovery when
-              ANY path entry is present, so Lombok must be listed explicitly here to
-              ensure it still runs in all modules.
-            -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <configuration>
-                    <annotationProcessorPaths>
-                        <path>
-                            <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok</artifactId>
-                            <version>${lombok.version}</version>
-                        </path>
-                    </annotationProcessorPaths>
-                </configuration>
-            </plugin>
+                <!-- Keep Lombok out of the repackaged Spring Boot fat jars (compile-time only). -->
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                    <configuration>
+                        <excludes>
+                            <exclude>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok</artifactId>
+                            </exclude>
+                        </excludes>
+                    </configuration>
+                </plugin>
+                <!--
+                  Explicitly register Lombok as an annotation processor path.
+                  This is required when third-party compile-time dependencies (avro-compiler,
+                  kafka-avro-serializer) are present on the classpath: Maven compiler 3.x
+                  respects annotationProcessorPaths over automatic classpath discovery when
+                  ANY path entry is present, so Lombok must be listed explicitly here to
+                  ensure it still runs in all modules.
+                -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <configuration>
+                        <annotationProcessorPaths>
+                            <path>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok</artifactId>
+                                <version>${lombok.version}</version>
+                            </path>
+                        </annotationProcessorPaths>
+                    </configuration>
+                </plugin>
             </plugins>
         </pluginManagement>
     </build>
@@ -217,6 +223,39 @@
                 <groupId>io.trino</groupId>
                 <artifactId>trino-jdbc</artifactId>
                 <version>${trino.jdbc.version}</version>
+            </dependency>
+
+            <!-- ===== Observability — Distributed Tracing ===== -->
+            <!-- Bridges Micrometer Observation API to OpenTelemetry SDK;
+                 enables Spring Boot auto-configuration of Tracer + ObservationRegistry. -->
+            <dependency>
+                <groupId>io.micrometer</groupId>
+                <artifactId>micrometer-tracing-bridge-otel</artifactId>
+                <version>${micrometer-tracing.version}</version>
+            </dependency>
+            <!-- OTLP gRPC exporter — ships spans to OTEL Collector / Jaeger / Tempo. -->
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-exporter-otlp</artifactId>
+                <version>${opentelemetry.version}</version>
+            </dependency>
+
+            <!-- ===== Observability — Structured Log Aggregation ===== -->
+            <!-- Logstash JSON encoder for logback — produces structured JSON logs
+                 consumed by Fluent Bit → Loki in the prod profile. -->
+            <dependency>
+                <groupId>net.logstash.logback</groupId>
+                <artifactId>logstash-logback-encoder</artifactId>
+                <version>${logstash-logback-encoder.version}</version>
+            </dependency>
+
+            <!-- ===== Flink Prometheus Metrics Reporter ===== -->
+            <!-- Exposes Flink operator metrics (checkpoint lag, backpressure, throughput)
+                 to a Prometheus scrape endpoint on a dedicated port. -->
+            <dependency>
+                <groupId>org.apache.flink</groupId>
+                <artifactId>flink-metrics-prometheus</artifactId>
+                <version>${flink.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

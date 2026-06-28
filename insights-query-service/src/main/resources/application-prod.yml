@@ -1,6 +1,18 @@
 spring:
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka-prod-msk:9094}
+    consumer:
+      enable-auto-commit: false
+      max-poll-records: 500
+      properties:
+        fetch.min.bytes: 1048576
+        fetch.max.wait.ms: 500
+        max.poll.interval.ms: 300000
+        heartbeat.interval.ms: 15000
+        session.timeout.ms: 45000
+    listener:
+      ack-mode: MANUAL_IMMEDIATE
+      concurrency: ${KAFKA_LISTENER_CONCURRENCY:64}   # match prod partition count
     properties:
       security.protocol: ${KAFKA_SECURITY_PROTOCOL:SASL_SSL}
       sasl.mechanism: ${KAFKA_SASL_MECHANISM:SCRAM-SHA-512}
@@ -33,7 +45,7 @@ platform:
       mode: local
       local-key: ${PASETO_LOCAL_KEY:}
       issuer: ${PASETO_ISSUER:edge}
-      audience: ${PASETO_AUDIENCE:media-pulse-iq}
+      audience: ${PASETO_AUDIENCE:event-analysis}
       token-header: ${PASETO_TOKEN_HEADER:X-Internal-Token}
       clock-skew-seconds: 30
 
@@ -54,3 +66,10 @@ management:
       show-details: never
       probes:
         enabled: true
+  # ---- OB-1: Distributed Tracing (prod) ----
+  tracing:
+    sampling:
+      probability: 0.1
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://otel-collector:4318/v1/traces}

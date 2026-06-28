@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.java.ingestion.common.ApiException;
 import com.java.ingestion.dto.IngestEventRequest;
 import com.java.ingestion.dto.IngestEventResponse;
-import com.java.ingestion.security.PasetoProperties;
+import com.java.security.paseto.PasetoProperties;
 import com.java.ingestion.service.IngestionService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

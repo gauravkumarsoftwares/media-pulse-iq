@@ -2,7 +2,7 @@ package com.java.model;
 
 /**
  * Enumerates the canonical event types tracked across the shopping network,
- * aligned with the Protobuf schema in architecture.md (2.1).
+ * aligned with the Protobuf schema in SDD.md (2.1).
  */
 public enum EventType {
     UNSPECIFIED,

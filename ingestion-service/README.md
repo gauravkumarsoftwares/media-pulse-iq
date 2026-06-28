@@ -35,6 +35,7 @@ Kong API Gateway (Edge)
 │                   ingestion-service                       │
 │                                                          │
 │  PasetoAuthenticationFilter (@Order 0)                   │
+│    └─ extends AbstractPasetoAuthenticationFilter         │
 │    └─ verifies v4.local token (shared symmetric key)     │
 │    └─ enforces write:events scope                        │
 │    └─ rewrites X-Tenant-Context from verified claims     │
@@ -60,13 +61,16 @@ Kong API Gateway (Edge)
 
 | Concern | Implementation |
 |:--------|:---------------|
-| **Authentication** | `PasetoAuthenticationFilter` — verifies in-service PASETO `v4.local` token (Option C), enforces `write:events` scope |
-| **Tenant isolation** | `TenantContextFilter` — defense-in-depth header presence check; controller re-check |
+| **Authentication** | `PasetoAuthenticationFilter` — extends `AbstractPasetoAuthenticationFilter` from `shared-security`; declares `write:events` scope |
+| **Tenant isolation** | `TenantContextFilter` — defense-in-depth header presence check; populates MDC `requestId`/`tenantId`; controller re-check |
 | **Rate limiting** | `TenantRateLimiter` — Redis sliding-window counter, per-tenant TPS limit |
 | **Schema validation** | `SchemaValidator` — mandatory field presence + recognized `EventType` |
-| **DLQ routing** | `DlqProducer` — invalid events sent to the dead-letter topic for SRE replay |
-| **Event publish** | `EventProducer` — Avro-serialized `ShoppingEvent` to the Kafka raw topic |
-| **Observability** | `IngestionMetrics` — Micrometer counters/timers exposed via Prometheus |
+| **DLQ routing** | `DlqProducer` — invalid schema events AND permanent Kafka send failures routed to the dead-letter topic for SRE replay |
+| **Event publish** | `EventProducer` — idempotent Avro-serialized `ShoppingEvent` to the Kafka raw topic; injects `X-Request-Id` Kafka header (OB-2); routes to DLQ on permanent broker failure |
+| **DLQ replay** | `DlqReplayController` / `DlqReplayService` — admin REST endpoints to inspect and replay DLQ events (OB-4) |
+| **Observability** | `IngestionMetrics` — Micrometer counters/timers; `DlqReplayMetrics` — DLQ replay counters; all exposed via Prometheus |
+| **Distributed tracing** | Micrometer OTEL bridge — auto-instruments HTTP and Kafka sends with W3C `traceparent` header (OB-1) |
+| **Access logging** | `RequestLoggingFilterConfig` — Spring `CommonsRequestLoggingFilter` (DEBUG-gated) |
 
 ---
 
@@ -80,10 +84,18 @@ com.java.ingestion/
 │   └── GlobalExceptionHandler.java # @RestControllerAdvice: maps exceptions to ApiErrorResponse
 │
 ├── config/
-│   └── KafkaProducerConfig.java   # KafkaTemplate + ProducerFactory wiring
+│   ├── KafkaProducerConfig.java   # KafkaTemplate + ProducerFactory wiring; observation-enabled=true (OB-1)
+│   └── RequestLoggingFilterConfig.java # CommonsRequestLoggingFilter: full URI, headers, body up to 4 KB
 │
 ├── controller/
 │   └── IngestController.java      # POST /api/v1/events — thin controller, delegates to IngestionService
+│
+├── dlq/                           # OB-4: DLQ replay tooling
+│   ├── DlqReplayController.java   # POST /api/v1/admin/dlq/replay, GET /api/v1/admin/dlq/stats
+│   ├── DlqReplayService.java      # One-shot KafkaConsumer replay logic with tenantId/reason filtering
+│   ├── DlqReplayMetrics.java      # ads_dlq_replayed_total, ads_dlq_replay_failed_total counters
+│   ├── DlqReplayRequest.java      # Request DTO: tenantId, reason, maxEvents
+│   └── DlqReplaySummary.java      # Response DTO: replayed, skipped, failed, total
 │
 ├── dto/
 │   ├── IngestEventRequest.java    # Input DTO with Jakarta Bean Validation (@NotBlank, @Size, @DecimalMin)
@@ -93,18 +105,16 @@ com.java.ingestion/
 │   └── IngestionMetrics.java      # Micrometer: events_accepted_total, events_validation_failed_total, etc.
 │
 ├── producer/
-│   ├── DlqProducer.java           # Publishes rejected events to the DLQ Kafka topic
-│   └── EventProducer.java         # Publishes validated events to the raw Kafka topic
+│   ├── DlqProducer.java           # Publishes rejected events to the DLQ Kafka topic with dlq-reason header
+│   └── EventProducer.java         # Publishes validated events to raw topic; injects X-Request-Id header (OB-2)
 │
 ├── ratelimit/
 │   ├── RateLimitProperties.java   # Binds platform.rate-limit.* config
 │   └── TenantRateLimiter.java     # Redis-backed sliding-window rate limiter (per tenant)
 │
 ├── security/
-│   ├── PasetoAuthenticationFilter.java # @Order(0): verifies PASETO token, enforces write:events scope
-│   ├── PasetoProperties.java           # Binds platform.security.paseto.*
-│   ├── PasetoSecurityConfig.java       # Builds PasetoVerifier bean; fail-closed startup guard
-│   └── TenantContextFilter.java        # @Order(1): tenant header presence check
+│   ├── PasetoAuthenticationFilter.java # @Order(0): extends AbstractPasetoAuthenticationFilter; declares write:events scope
+│   └── TenantContextFilter.java        # @Order(1): tenant header check + MDC requestId/tenantId injection (OB-2)
 │
 ├── service/
 │   ├── IngestionService.java      # Interface: ingest(IngestEventRequest, tenantId)
@@ -115,6 +125,8 @@ com.java.ingestion/
 │
 └── IngestionApplication.java      # Spring Boot entry point
 ```
+
+> `PasetoProperties` and `PasetoSecurityConfig` are **not** declared in this module — they are auto-configured from the `shared-security` dependency. The `PasetoVerifier` bean is constructed there based on `platform.security.paseto.*` properties.
 
 ---
 
@@ -170,7 +182,7 @@ Ingest a single ad-interaction event.
 {
   "status":             "ACCEPTED",
   "eventId":            "evt_abc123",
-  "processedTimestamp": "2026-06-26T08:00:00Z",
+  "processedTimestamp": "2026-06-27T08:00:00Z",
   "remainingQuota":     498
 }
 ```
@@ -191,7 +203,7 @@ All non-2xx responses return a consistent JSON envelope:
 
 ```json
 {
-  "timestamp":   "2026-06-26T08:00:00.000Z",
+  "timestamp":   "2026-06-27T08:00:00.000Z",
   "status":      422,
   "error":       "Unprocessable Entity",
   "message":     "Request validation failed",
@@ -213,15 +225,18 @@ Authentication follows the **edge-validated PASETO, header-propagated trust** mo
 ```
 External v4.public token → Kong verifies → mints v4.local internal token
 → X-Internal-Token forwarded to this service
-→ PasetoAuthenticationFilter verifies v4.local with shared key
-→ enforces write:events scope
-→ rewrites X-Tenant-Context from verified claims
+→ PasetoAuthenticationFilter (extends AbstractPasetoAuthenticationFilter from shared-security)
+    → verifies v4.local with shared key
+    → enforces write:events scope
+    → rewrites X-Tenant-Context from verified claims (TenantOverrideRequest)
 → TenantContextFilter: defense-in-depth header presence check
 ```
 
-**In local dev** (`spring.profiles.active=local`): `platform.security.paseto.enabled=false` — the filter passes through and the service trusts the gateway-injected `X-Tenant-Context` header directly.
+`PasetoAuthenticationFilter` is a thin subclass — it declares only `requiredScope() → "write:events"`. All verification logic, audit logging, and tenant header rewriting are inherited from `AbstractPasetoAuthenticationFilter` in `shared-security`.
 
-**In staging/prod**: `mode=local` + `local-key=${PASETO_LOCAL_KEY}` — the service verifies the `v4.local` symmetric token in-process. The service **refuses to start** if `PASETO_LOCAL_KEY` is missing (fail-closed guard).
+**In local dev** (`spring.profiles.active=local`): `platform.security.paseto.enabled=false` — the filter is bypassed and the service trusts the gateway-injected `X-Tenant-Context` header directly.
+
+**In staging/prod**: `mode=local` + `local-key=${PASETO_LOCAL_KEY}` — the service verifies the `v4.local` symmetric token in-process. The service **refuses to start** if `PASETO_LOCAL_KEY` is missing (fail-closed guard in `PasetoSecurityConfig`).
 
 ---
 
@@ -262,12 +277,42 @@ All properties are in `src/main/resources/application[-profile].yml`.
 | Property | Default | Description |
 |:---------|:--------|:------------|
 | `spring.kafka.bootstrap-servers` | `localhost:9092` | Kafka broker(s) |
-| `spring.kafka.producer.acks` | `all` | Durability: all replicas must ack |
+| `spring.kafka.producer.acks` | `all` | All in-sync replicas must ack before send completes |
+| `spring.kafka.producer.retries` | `2147483647` | Effectively infinite; bounded by `delivery.timeout.ms` |
+| `spring.kafka.producer.properties.enable.idempotence` | `true` | Prevents broker-side duplicate writes on retry |
+| `spring.kafka.producer.properties.max.in.flight.requests.per.connection` | `5` | Max safe value with idempotence enabled |
+| `spring.kafka.producer.properties.delivery.timeout.ms` | `120000` | Total retry window (2 min) before DLQ fallback |
+| `spring.kafka.producer.properties.request.timeout.ms` | `30000` | Per-attempt broker timeout |
+| `spring.kafka.producer.properties.linger.ms` | `10` | Batch accumulation window (10 ms) for higher throughput |
+| `spring.kafka.producer.properties.batch.size` | `65536` | Per-partition batch size (64 KB) |
+| `spring.kafka.producer.properties.buffer.memory` | `67108864` | Total producer buffer before back-pressure (64 MB) |
+| `spring.kafka.producer.properties.compression.type` | `lz4` | LZ4 compression (~50–60% size reduction on Avro payloads) |
 | `platform.kafka.env` | `local` | Environment prefix for topic names |
-| `platform.kafka.topic.raw` | _(derived)_ | Raw events topic |
-| `platform.kafka.topic.dlq` | _(derived)_ | Dead-letter topic |
+| `platform.kafka.topic.raw` | _(derived)_ | Raw events topic (partition key: `tenantId:sessionId`) |
+| `platform.kafka.topic.dlq` | _(derived)_ | Dead-letter topic for rejected and permanently failed events |
+
+### Observability (OB-1 / OB-2 / OB-4 / OB-5)
+
+| Property | Default | Description |
+|:---------|:--------|:------------|
+| `management.tracing.sampling.probability` | `1.0` (local) / `0.1` (prod) | Fraction of traces exported to OTEL Collector |
+| `management.otlp.tracing.endpoint` | `http://otel-collector:4318/v1/traces` | OTLP HTTP endpoint — set to Jaeger/Tempo/Grafana Tempo in prod |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | _(env var)_ | Overrides OTLP endpoint per environment (set in docker-compose / K8s) |
+
+**MDC Correlation (OB-2):** `TenantContextFilter` injects `requestId` (from `X-Request-Id` header or auto-generated UUID) and `tenantId` into SLF4J MDC for every request. `EventProducer` carries `requestId` across the Kafka boundary as `X-Request-Id` record header.
+
+**DLQ Replay (OB-4):**
+
+| Endpoint | Description |
+|:---------|:------------|
+| `POST /api/v1/admin/dlq/replay` | Re-publishes DLQ events to raw topic. Body: `{ "tenantId": "...", "reason": "...", "maxEvents": 1000 }` |
+| `GET /api/v1/admin/dlq/stats` | Returns DLQ partition watermarks and total lag |
+
+**Structured Logs (OB-5):** Spring profile `prod` activates `LogstashEncoder` JSON appender in `logback-spring.xml`, enriching every log line with `requestId`, `tenantId`, `service`, and `env` fields for Fluent Bit → Loki ingestion.
 
 ### Security (PASETO)
+
+PASETO configuration is shared across all services via `shared-security` auto-configuration. Properties are bound by `PasetoProperties` in that module.
 
 | Property | Local | Staging/Prod | Description |
 |:---------|:------|:-------------|:------------|
@@ -276,7 +321,7 @@ All properties are in `src/main/resources/application[-profile].yml`.
 | `platform.security.paseto.local-key` | — | `${PASETO_LOCAL_KEY}` | 32-byte symmetric key (K8s Secret) |
 | `platform.security.paseto.token-header` | `Authorization` | `X-Internal-Token` | Header carrying the token |
 | `platform.security.paseto.issuer` | — | `edge` | Expected `iss` claim |
-| `platform.security.paseto.audience` | — | `media-pulse-iq` | Expected `aud` claim |
+| `platform.security.paseto.audience` | — | `event-analysis` | Expected `aud` claim |
 | `platform.security.paseto.clock-skew-seconds` | `60` | `30` | Allowed clock skew |
 
 ### Rate Limiting
@@ -368,7 +413,13 @@ docker build -t ingestion-service:latest ingestion-service/
 | **DTO layer (`IngestEventRequest`)** | Decouples HTTP API contract from `ShoppingEvent` Kafka wire format; enables Jakarta `@Valid` constraints before the service layer is reached |
 | **Service layer (`IngestionService`)** | Keeps controller thin (no business logic); service is independently testable; single responsibility per class |
 | **`GlobalExceptionHandler`** | Centralized `@RestControllerAdvice` ensures every error, including `@Valid` failures, returns the same `ApiErrorResponse` envelope — no leaking of stack traces |
-| **`write:events` scope enforcement** | Ingestion filter enforces the token's ingest authorization scope before any work is done, complementing the gateway's edge-level scope check (OWASP A01) |
-| **Fail-closed PASETO startup guard** | If auth is enabled but the symmetric key is absent, the service refuses to start — prevents silent auth bypass on misconfigured deployments (OWASP A05/A07) |
+| **`write:events` scope via `AbstractPasetoAuthenticationFilter`** | Scope enforcement is declared in the filter subclass and applied by the shared base — consistent with how the query service declares `read:ads`, audited in one place |
+| **Fail-closed PASETO startup guard** | Provided by `PasetoSecurityConfig` in `shared-security` — if auth is enabled but the key is absent the service refuses to start (OWASP A05/A07) |
 | **DLQ for invalid schemas** | Events that pass DTO validation but fail `SchemaValidator` are routed to the dead-letter topic rather than returning 400, allowing SRE replay without data loss |
-
+| **DLQ for permanent send failures** | `EventProducer` uses an idempotent Kafka producer (`enable.idempotence=true`) that retries within `delivery.timeout.ms` (2 min). On permanent broker rejection the event is forwarded to the DLQ via `DlqProducer` — no silent data loss |
+| **Idempotent producer** | `enable.idempotence=true` + `max.in.flight=5` prevents broker-side duplicates when the producer retries a send. Combined with `acks=all` this provides at-least-once delivery with no duplicates under normal retry conditions |
+| **`RequestLoggingFilterConfig`** | `CommonsRequestLoggingFilter` writes structured access-log entries gated at `DEBUG` level — provides request traceability without coupling application code to logging infrastructure |
+| **MDC correlation (OB-2)** | `TenantContextFilter` sets `requestId` (from `X-Request-Id` or auto-UUID) and `tenantId` in SLF4J MDC. `EventProducer` carries the same `requestId` as a Kafka record header so downstream consumers can restore MDC context, enabling end-to-end log correlation across the async Kafka boundary |
+| **Distributed tracing (OB-1)** | `KafkaProducerConfig` enables `template.setObservationEnabled(true)`. With `micrometer-tracing-bridge-otel` on the classpath, Spring Kafka automatically injects W3C `traceparent` header into every record and creates a Micrometer Observation span per send |
+| **DLQ replay tooling (OB-4)** | `DlqReplayService` uses a one-shot `KafkaConsumer` (unique group ID per replay) to read DLQ events, filter by `tenantId`/`reason`, and re-publish to the raw topic. `DlqReplayController` exposes the replay and stats endpoints. `DlqReplayMetrics` exposes `ads_dlq_replayed_total` and `ads_dlq_replay_failed_total` counters |
+| **Structured log aggregation (OB-5)** | `logback-spring.xml` activates `LogstashEncoder` JSON appender in the `prod` profile. JSON lines include `requestId`, `tenantId`, `service`, and `env` fields for Fluent Bit → Loki ingestion and correlated Grafana log queries |

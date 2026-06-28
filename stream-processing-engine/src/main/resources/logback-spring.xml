@@ -1,19 +1,41 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   Logging hardening (OWASP A09): redact emails / IPv4 from all messages.
+  Observability (OB-2): %X{requestId} and %X{tenantId} are included in every line,
+    sourced from MDC populated by EventConsumer after extracting Kafka record headers.
+  Observability (OB-5): prod profile uses LogstashEncoder JSON for Loki ingestion.
 -->
 <configuration>
+
+    <springProperty scope="context" name="SERVICE_NAME" source="spring.application.name" defaultValue="stream-processing-engine"/>
 
     <property name="MASK_PATTERN"
               value="%replace(%replace(%msg){'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}','***@***'}){'\b(?:\d{1,3}\.){3}\d{1,3}\b','***.***.***.***'}"/>
 
+    <!-- Development / staging console appender with MDC correlation IDs (OB-2) -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - ${MASK_PATTERN}%n</pattern>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{requestId}] [%X{tenantId}] %logger{36} - ${MASK_PATTERN}%n</pattern>
         </encoder>
     </appender>
 
-    <root level="INFO">
-        <appender-ref ref="CONSOLE"/>
-    </root>
+    <!-- Production: structured JSON → Fluent Bit → Loki (OB-5) -->
+    <springProfile name="prod">
+        <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <includeMdcKeyName>requestId</includeMdcKeyName>
+                <includeMdcKeyName>tenantId</includeMdcKeyName>
+                <customFields>{"service":"${SERVICE_NAME}","env":"prod"}</customFields>
+            </encoder>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="JSON"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="!prod">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
 </configuration>

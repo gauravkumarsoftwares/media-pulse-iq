@@ -1,6 +1,6 @@
 # shared-security
 
-> **Role in the platform:** Reusable security library — provides the in-process PASETO token verification primitives, PII masking utilities, and the pluggable `PasetoVerifier` interface consumed by `ingestion-service` and `insights-query-service`.
+> **Role in the platform:** Reusable security library — provides the in-process PASETO token verification primitives, the `AbstractPasetoAuthenticationFilter` base class consumed by all services, shared `PasetoProperties` and `PasetoSecurityConfig` auto-configuration, and PII masking utilities.
 
 ---
 
@@ -17,6 +17,10 @@
   - [PasetoV4LocalIssuer — Token Minting](#paseto-v4localissuer--token-minting)
   - [PasetoClaims](#pasetoclaims)
   - [ClaimsValidator](#claimsvalidator)
+- [Shared Filter Infrastructure](#shared-filter-infrastructure)
+  - [AbstractPasetoAuthenticationFilter](#abstractpasetoauthenticationfilter)
+  - [PasetoProperties](#paseto-properties)
+  - [PasetoSecurityConfig — Spring Boot Auto-Configuration](#paseto-securityconfig--spring-boot-auto-configuration)
 - [PII Utilities](#pii-utilities)
   - [PiiMasker](#piimasker)
 - [Cryptographic Internals](#cryptographic-internals)
@@ -37,9 +41,10 @@
 `shared-security` eliminates the most common sources of authentication bugs by:
 
 1. **Centralizing all PASETO cryptography** in one auditable library — services cannot implement their own token parsing.
-2. **Providing a pluggable `PasetoVerifier` interface** so the filter in each service is agnostic to whether it is verifying an external `v4.public` token or a gateway-minted internal `v4.local` token.
-3. **Sharing `ClaimsValidator`** so `exp`/`nbf`/`iss`/`aud` checks are identical across both token flavours — they cannot drift independently.
-4. **Providing `PiiMasker`** so all services can safely log user-facing data without leaking emails or IP addresses.
+2. **Providing `AbstractPasetoAuthenticationFilter`** so every service gets identical auth lifecycle behaviour (token extraction, tenant enforcement, scope check, audit logging, `TenantOverrideRequest` header rewrite) without copy-pasting code.
+3. **Shipping `PasetoProperties` and `PasetoSecurityConfig` as Spring Boot auto-configuration** — consuming services need zero `@Configuration` boilerplate; they pick up the `PasetoVerifier` bean and fail-closed key guard automatically.
+4. **Sharing `ClaimsValidator`** so `exp`/`nbf`/`iss`/`aud` checks are identical across both token flavours — they cannot drift independently.
+5. **Providing `PiiMasker`** so all services can safely log user-facing data without leaking emails or IP addresses.
 
 ---
 
@@ -49,24 +54,28 @@
 com.java.security/
 │
 ├── paseto/
-│   ├── PasetoVerifier.java           # Pluggable verification interface: verify(token) → PasetoClaims
-│   ├── PasetoClaims.java             # Verified claims record: tenantId, scopes, allowedCampaigns, iss, aud, exp, nbf, jti
-│   ├── PasetoException.java          # Runtime exception thrown on any verification failure
+│   ├── PasetoVerifier.java                   # Pluggable verification interface: verify(token) → PasetoClaims
+│   ├── PasetoClaims.java                     # Verified claims record: tenantId, scopes, allowedCampaigns, iss, aud, exp, nbf, jti
+│   ├── PasetoException.java                  # Runtime exception thrown on any verification failure
 │   │
-│   ├── PasetoV4PublicVerifier.java   # Implements PasetoVerifier for v4.public (Ed25519 signature)
-│   ├── PasetoV4LocalVerifier.java    # Implements PasetoVerifier for v4.local (symmetric decrypt + auth)
-│   ├── PasetoV4Local.java            # Low-level v4.local encrypt/decrypt (XChaCha20 + BLAKE2b)
-│   ├── PasetoV4LocalIssuer.java      # Mints v4.local tokens (edge / token-exchange step)
+│   ├── AbstractPasetoAuthenticationFilter.java # Shared OncePerRequestFilter base: token verify, scope check, audit log, tenant rewrite
+│   ├── PasetoProperties.java                 # @ConfigurationProperties(prefix="platform.security.paseto") — shared across all services
+│   ├── PasetoSecurityConfig.java             # Spring Boot auto-configuration: PasetoVerifier bean + fail-closed key guard
 │   │
-│   ├── ClaimsValidator.java          # Shared exp/nbf/iss/aud validation (package-private)
-│   ├── Ed25519Keys.java              # Parses Ed25519 public keys (PEM / X.509 DER / raw hex|base64)
-│   ├── SymmetricKeys.java            # Parses 32-byte symmetric keys (hex / base64)
-│   ├── Pae.java                      # Pre-Authentication Encoding (PAE) per PASETO spec
-│   ├── XChaCha20.java                # XChaCha20 stream cipher (HChaCha20 + BouncyCastle ChaCha20)
-│   └── Blake2b.java                  # Keyed BLAKE2b-256 MAC (BouncyCastle)
+│   ├── PasetoV4PublicVerifier.java           # Implements PasetoVerifier for v4.public (Ed25519 signature)
+│   ├── PasetoV4LocalVerifier.java            # Implements PasetoVerifier for v4.local (symmetric decrypt + auth)
+│   ├── PasetoV4Local.java                    # Low-level v4.local encrypt/decrypt (XChaCha20 + BLAKE2b)
+│   ├── PasetoV4LocalIssuer.java              # Mints v4.local tokens (edge / token-exchange step)
+│   │
+│   ├── ClaimsValidator.java                  # Shared exp/nbf/iss/aud validation (package-private)
+│   ├── Ed25519Keys.java                      # Parses Ed25519 public keys (PEM / X.509 DER / raw hex|base64)
+│   ├── SymmetricKeys.java                    # Parses 32-byte symmetric keys (hex / base64)
+│   ├── Pae.java                              # Pre-Authentication Encoding (PAE) per PASETO spec
+│   ├── XChaCha20.java                        # XChaCha20 stream cipher (HChaCha20 + BouncyCastle ChaCha20)
+│   └── Blake2b.java                          # Keyed BLAKE2b-256 MAC (BouncyCastle)
 │
 └── pii/
-    └── PiiMasker.java                # Masks emails + IPv4 addresses; SHA-256 pseudonymizer
+    └── PiiMasker.java                        # Masks emails + IPv4 addresses; SHA-256 pseudonymizer
 ```
 
 ---
@@ -95,7 +104,7 @@ public interface PasetoVerifier {
 }
 ```
 
-The Spring `PasetoSecurityConfig` in each service builds the correct implementation at startup based on `platform.security.paseto.mode`:
+The `PasetoSecurityConfig` auto-configuration in `shared-security` builds the correct implementation at startup based on `platform.security.paseto.mode` — services do not need to declare this bean themselves:
 
 ```java
 if ("local".equalsIgnoreCase(mode)) {
@@ -122,7 +131,7 @@ Verifies externally-signed `v4.public` tokens (used when `mode=public`).
 PasetoVerifier verifier = new PasetoV4PublicVerifier(
     publicKeyBase64,    // X.509 DER encoded Ed25519 public key (base64)
     "auth.platform.internal",  // expected iss (null = not enforced)
-    "media-pulse-iq",          // expected aud (null = not enforced)
+    "event-analysis",          // expected aud (null = not enforced)
     Duration.ofSeconds(30)     // clock skew tolerance
 );
 
@@ -152,7 +161,7 @@ Verifies gateway-minted `v4.local` tokens (used when `mode=local`, the deployed 
 PasetoVerifier verifier = new PasetoV4LocalVerifier(
     keyBase64,          // 32-byte symmetric key (hex or base64)
     "edge",             // expected iss
-    "media-pulse-iq",   // expected aud
+    "event-analysis",   // expected aud
     Duration.ofSeconds(30)
 );
 
@@ -191,7 +200,7 @@ Produces short-lived `v4.local` tokens. In production, this logic runs **at the 
 PasetoV4LocalIssuer issuer = new PasetoV4LocalIssuer(
     sharedKeyBase64,
     "edge",           // iss
-    "media-pulse-iq"  // aud
+    "event-analysis"  // aud
 );
 
 // Mint a 60-second internal token for the verified tenant
@@ -234,7 +243,7 @@ public record PasetoClaims(
 **Authorization helpers:**
 
 ```java
-// Scope check — used by PasetoAuthenticationFilter
+// Scope check — used by AbstractPasetoAuthenticationFilter
 if (!claims.hasScope("read:ads")) { return 403; }
 
 // Campaign allow-list — used by InsightsServiceImpl
@@ -250,13 +259,77 @@ if (!claims.canAccessCampaign(campaignId)) { return 403; }
 Package-private shared validator — ensures `exp`/`nbf`/`iss`/`aud` checks are **identical** across `PasetoV4PublicVerifier` and `PasetoV4LocalVerifier`. The two verifiers call `ClaimsValidator.validate(claims, expectedIssuer, expectedAudience, clockSkew)` after parsing claims JSON.
 
 ```
-Token expired?      → "Token expired"
+Token expired?       → "Token expired"
 Token not yet valid? → "Token not yet valid"
-Wrong issuer?       → "Unexpected token issuer"
-Wrong audience?     → "Unexpected token audience"
+Wrong issuer?        → "Unexpected token issuer"
+Wrong audience?      → "Unexpected token audience"
 ```
 
 If `expectedIssuer`/`expectedAudience` is blank (or configured as empty string), the corresponding check is skipped.
+
+---
+
+## Shared Filter Infrastructure
+
+### AbstractPasetoAuthenticationFilter
+
+`AbstractPasetoAuthenticationFilter` is a `OncePerRequestFilter` base class that all service-level PASETO filters extend. It centralizes:
+
+- **Token extraction** from the header defined by `PasetoProperties#getTokenHeader()`
+- **Tenant enforcement** — rejects tokens with a blank `tenant_id` claim (`401`)
+- **Scope enforcement** — rejects tokens missing the scope returned by `requiredScope()` (`403`); each service subclass declares its own scope
+- **Header rewrite** — injects the cryptographically verified `tenant_id` as `X-Tenant-Context` via an inner `TenantOverrideRequest` wrapper, preventing clients from spoofing the header downstream
+- **Audit logging** — auth success/failure events are written to the `SECURITY_AUDIT` logger for SIEM ingestion (OWASP A09), independent of the application log level
+- **Bypass** — the filter is a no-op when `verifier` is `null` (local dev, auth disabled) or the URI starts with `/actuator`
+
+**Implementing a service filter:**
+
+```java
+@Component
+@Order(0)
+public final class PasetoAuthenticationFilter extends AbstractPasetoAuthenticationFilter {
+
+    public PasetoAuthenticationFilter(@Nullable PasetoVerifier verifier,
+                                      PasetoProperties props) {
+        super(verifier, props);
+    }
+
+    @Override
+    protected String requiredScope() {
+        return "write:events"; // or "read:ads" for the query service
+    }
+}
+```
+
+Services need only declare `@Component @Order(0)` and implement `requiredScope()` — all authentication logic is inherited.
+
+---
+
+### PasetoProperties
+
+`PasetoProperties` is annotated with `@ConfigurationProperties(prefix = "platform.security.paseto")` and is registered by `PasetoSecurityConfig`. Services do **not** need to declare their own copy.
+
+| Property | Default | Description |
+|:---------|:--------|:------------|
+| `platform.security.paseto.enabled` | `false` | Enable in-service token verification |
+| `platform.security.paseto.mode` | `public` | `public` = verify `v4.public` (Ed25519); `local` = verify `v4.local` (symmetric) |
+| `platform.security.paseto.public-key` | — | Ed25519 public key (PEM / X.509 base64 / raw hex\|base64) — mode=public |
+| `platform.security.paseto.local-key` | — | 32-byte symmetric key (hex/base64) — mode=local |
+| `platform.security.paseto.issuer` | — | Expected `iss` claim; empty = not enforced |
+| `platform.security.paseto.audience` | — | Expected `aud` claim; empty = not enforced |
+| `platform.security.paseto.token-header` | `Authorization` | Header carrying the token (gateway-forwarded) |
+| `platform.security.paseto.clock-skew-seconds` | `60` | Allowed clock skew in seconds |
+
+---
+
+### PasetoSecurityConfig — Spring Boot Auto-Configuration
+
+`PasetoSecurityConfig` is registered in `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` — every service that depends on `shared-security` automatically receives:
+
+1. **`PasetoVerifier` bean** — built from `PasetoProperties`; returns `null` when `enabled=false` so `AbstractPasetoAuthenticationFilter.shouldNotFilter()` bypasses all requests in local dev.
+2. **`pasetoKeyGuard` ApplicationRunner** — throws `IllegalStateException` at startup if PASETO is enabled but the required key is missing (fail-closed, OWASP A05/A07).
+
+Only activates in servlet web applications (`@ConditionalOnWebApplication`). Flink or other non-servlet modules that depend on `shared-security` for cryptographic primitives are unaffected.
 
 ---
 
@@ -352,12 +425,12 @@ PasetoV4LocalIssuer.issue(tenantId, scopes, allowedCampaigns, ttl=60s)
           ▼
 X-Internal-Token header forwarded to microservice
           │
-          │ PasetoV4LocalVerifier.verify(token)
+          │ AbstractPasetoAuthenticationFilter → PasetoV4LocalVerifier.verify(token)
           ▼
 PasetoClaims (tenantId, scopes, allowedCampaigns, exp, iss, aud)
 ```
 
-The external token **never** enters the internal mesh. The internal token has a tiny TTL (~60 seconds), an audience scoped to `media-pulse-iq`, and carries the same claims as the external token. Services verify the internal token with the shared `PASETO_LOCAL_KEY`.
+The external token **never** enters the internal mesh. The internal token has a tiny TTL (~60 seconds), an audience scoped to `event-analysis`, and carries the same claims as the external token. Services verify the internal token with the shared `PASETO_LOCAL_KEY`.
 
 ---
 
@@ -373,6 +446,11 @@ The external token **never** enters the internal mesh. The internal token has a 
 Transitive dependencies provided:
 - `jackson-databind` (JSON claims parsing)
 - `bcprov-jdk18on` (BouncyCastle: XChaCha20 + BLAKE2b for v4.local)
+
+After adding the dependency:
+1. `PasetoProperties` and `PasetoVerifier` are auto-configured — no `@EnableConfigurationProperties` needed.
+2. Declare a `PasetoAuthenticationFilter extends AbstractPasetoAuthenticationFilter` annotated `@Component @Order(0)`, implementing `requiredScope()`.
+3. Configure `platform.security.paseto.*` in your `application[-profile].yml`.
 
 ---
 
@@ -405,8 +483,9 @@ All tests are pure unit tests — no external dependencies required.
 | **Algorithm confusion** | `PasetoV4PublicVerifier` hard-rejects any token not starting with `v4.public.`; `PasetoV4LocalVerifier` hard-rejects anything not starting with `v4.local.` |
 | **Timing side-channels** | `PasetoV4Local.decrypt` uses `MessageDigest.isEqual` (constant-time byte comparison) for MAC verification |
 | **Key material in logs** | `SymmetricKeys` and `Ed25519Keys` never log the raw key; `PiiMasker` is available for any string that might contain sensitive data |
-| **Null-safe claims** | `PasetoClaims.canAccessCampaign` and `hasScope` handle null/empty lists safely — the filter never throws NPE on malformed token payloads |
+| **Null-safe claims** | `PasetoClaims.canAccessCampaign` and `hasScope` handle null/empty lists safely  the filter never throws NPE on malformed token payloads |
 | **Fail-closed** | `SymmetricKeys.parse32` throws if the decoded key is not exactly 32 bytes — prevents silent truncation or padding accepting a weak key |
+| **Fail-closed startup guard** | `PasetoSecurityConfig.pasetoKeyGuard` throws `IllegalStateException` at boot if PASETO is enabled but the required key is absent — prevents silent auth bypass on misconfigured deployments |
 | **Clock skew** | `ClaimsValidator` applies a configurable skew (default 60s, prod 30s) to `exp` and `nbf` checks to tolerate minor clock drift between services |
 | **BouncyCastle scope** | BouncyCastle is used only for `XChaCha20` and `BLAKE2b` — primitives not available in the JDK 21 standard library. Ed25519 verification uses the JDK 21 native `Ed25519` provider |
-
+| **Tenant spoofing** | `AbstractPasetoAuthenticationFilter` wraps the request with `TenantOverrideRequest` which forces `X-Tenant-Context` to the verified claim value, preventing downstream components from reading a client-supplied header |

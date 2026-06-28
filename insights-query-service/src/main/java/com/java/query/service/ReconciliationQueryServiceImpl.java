@@ -4,8 +4,7 @@ import com.java.query.common.ApiException;
 import com.java.query.common.PagedResponse;
 import com.java.query.dto.ReconciliationDetailDto;
 import com.java.query.dto.ReconciliationResultDto;
-import com.java.query.dto.ReconciliationStatusEntry;
-import com.java.query.dto.ReconciliationSummaryDto;
+import com.java.query.dto.ReconciliationRunSummary;
 import com.java.query.reconciliation.ReconciliationJob;
 import com.java.query.reconciliation.ReconciliationReport;
 import com.java.query.reconciliation.ReconciliationResult;
@@ -24,9 +23,9 @@ import java.util.Optional;
 /**
  * Default {@link ReconciliationQueryService} implementation.
  *
- * <p>All mapping from internal domain objects ({@link ReconciliationReport},
- * {@link ReconciliationResult}) to API DTOs is centralized here, keeping both
- * the controller and the domain model free of serialization concerns.
+ * <p>All mapping from domain objects to API DTOs is centralised here (A2):
+ * a single {@link #toRunSummary(ReconciliationReport)} helper replaces the
+ * two previously duplicated methods ({@code toStatusEntry} / {@code toSummaryDto}).
  */
 @Service
 @RequiredArgsConstructor
@@ -39,11 +38,11 @@ public class ReconciliationQueryServiceImpl implements ReconciliationQueryServic
     // ---- status -------------------------------------------------------------
 
     @Override
-    public Map<String, ReconciliationStatusEntry> getStatus() {
-        Map<String, ReconciliationStatusEntry> result = new LinkedHashMap<>();
+    public Map<String, ReconciliationRunSummary> getStatus() {
+        Map<String, ReconciliationRunSummary> result = new LinkedHashMap<>();
         for (ReconciliationWindow w : ReconciliationWindow.values()) {
             Optional<ReconciliationReport> latest = store.findLatest(w);
-            result.put(w.getLabel(), latest.map(this::toStatusEntry)
+            result.put(w.getLabel(), latest.map(this::toRunSummary)
                     .orElseGet(ReconciliationQueryServiceImpl::noRunYet));
         }
         return result;
@@ -52,11 +51,11 @@ public class ReconciliationQueryServiceImpl implements ReconciliationQueryServic
     // ---- list reports -------------------------------------------------------
 
     @Override
-    public PagedResponse<ReconciliationSummaryDto> listReports(String window, int limit) {
+    public PagedResponse<ReconciliationRunSummary> listReports(String window, int limit) {
         ReconciliationWindow w = resolveWindow(window);
         int effectiveLimit = Math.min(Math.max(limit, 1), 48);
-        List<ReconciliationSummaryDto> summaries = store.findByWindow(w, effectiveLimit)
-                .stream().map(this::toSummaryDto).toList();
+        List<ReconciliationRunSummary> summaries = store.findByWindow(w, effectiveLimit)
+                .stream().map(this::toRunSummary).toList();
         return PagedResponse.of(summaries);
     }
 
@@ -78,39 +77,16 @@ public class ReconciliationQueryServiceImpl implements ReconciliationQueryServic
         return toDetailDto(report);
     }
 
-    // ---- window resolution --------------------------------------------------
+    // ---- mapping (A2 — single shared helper) --------------------------------
 
-    private static ReconciliationWindow resolveWindow(String label) {
-        for (ReconciliationWindow w : ReconciliationWindow.values()) {
-            if (w.getLabel().equalsIgnoreCase(label)) return w;
-        }
-        throw new ApiException(HttpStatus.BAD_REQUEST,
-                "Unknown window type '" + label + "'. Use 'hourly' or 'daily'.");
-    }
-
-    // ---- mapping ------------------------------------------------------------
-
-    private ReconciliationStatusEntry toStatusEntry(ReconciliationReport r) {
-        return new ReconciliationStatusEntry(
-                r.getRunId(),
-                r.getStatus().name(),
-                r.getRunTime().toString(),
-                r.getWindowStart() != null ? r.getWindowStart().toString() : null,
-                r.getWindowEnd()   != null ? r.getWindowEnd().toString()   : null,
-                r.totalCampaigns(),
-                r.discrepancyCount(),
-                r.autoPatchedCount(),
-                r.getElapsed().toMillis(),
-                r.getMessage().isBlank() ? null : r.getMessage());
-    }
-
-    private static ReconciliationStatusEntry noRunYet() {
-        return new ReconciliationStatusEntry(
-                null, "NO_RUN_YET", null, null, null, 0, 0, 0, 0, null);
-    }
-
-    private ReconciliationSummaryDto toSummaryDto(ReconciliationReport r) {
-        return new ReconciliationSummaryDto(
+    /**
+     * Maps a {@link ReconciliationReport} to a {@link ReconciliationRunSummary}.
+     * Used for both the status endpoint and the paginated list endpoint — the
+     * previously duplicated {@code toStatusEntry} and {@code toSummaryDto} methods
+     * are replaced by this single method (DRY).
+     */
+    private ReconciliationRunSummary toRunSummary(ReconciliationReport r) {
+        return new ReconciliationRunSummary(
                 r.getRunId(),
                 r.getStatus().name(),
                 r.getRunTime().toString(),
@@ -124,19 +100,14 @@ public class ReconciliationQueryServiceImpl implements ReconciliationQueryServic
     }
 
     private ReconciliationDetailDto toDetailDto(ReconciliationReport r) {
-        List<ReconciliationResultDto> resultDtos = r.getResults().stream()
-                .map(this::toResultDto).toList();
+        ReconciliationRunSummary summary = toRunSummary(r);
+        List<ReconciliationResultDto> resultDtos =
+                r.getResults().stream().map(this::toResultDto).toList();
         return new ReconciliationDetailDto(
-                r.getRunId(),
-                r.getStatus().name(),
-                r.getRunTime().toString(),
-                r.getWindowStart() != null ? r.getWindowStart().toString() : null,
-                r.getWindowEnd()   != null ? r.getWindowEnd().toString()   : null,
-                r.totalCampaigns(),
-                r.discrepancyCount(),
-                r.autoPatchedCount(),
-                r.getElapsed().toMillis(),
-                r.getMessage().isBlank() ? null : r.getMessage(),
+                summary.runId(), summary.status(), summary.runTime(),
+                summary.windowStart(), summary.windowEnd(),
+                summary.campaigns(), summary.discrepancies(), summary.autoPatched(),
+                summary.elapsedMs(), summary.message(),
                 resultDtos);
     }
 
@@ -153,6 +124,19 @@ public class ReconciliationQueryServiceImpl implements ReconciliationQueryServic
                 String.format("%.4f", res.discrepancyPct()),
                 res.autoPatched());
     }
+
+    // ---- helpers ------------------------------------------------------------
+
+    private static ReconciliationRunSummary noRunYet() {
+        return new ReconciliationRunSummary(
+                null, "NO_RUN_YET", null, null, null, 0, 0, 0, 0, null);
+    }
+
+    private static ReconciliationWindow resolveWindow(String label) {
+        for (ReconciliationWindow w : ReconciliationWindow.values()) {
+            if (w.getLabel().equalsIgnoreCase(label)) return w;
+        }
+        throw new ApiException(HttpStatus.BAD_REQUEST,
+                "Unknown window type '" + label + "'. Use 'hourly' or 'daily'.");
+    }
 }
-
-

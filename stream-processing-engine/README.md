@@ -1,6 +1,6 @@
 # stream-processing-engine
 
-> **Role in the platform:** Real-time stream processor — consumes raw ad-interaction events from Kafka, deduplicates them, synthesizes `CLICK_TO_BASKET` conversions via sessionized attribution joins, and fans out to three downstream sinks: Kafka enriched topic (→ Apache Pinot), Redis hot-counter cache, and Iceberg/S3 cold archive.
+> **Role in the platform:** Real-time stream processor — consumes raw ad-interaction events from Kafka, deduplicates them, synthesizes `CLICK_TO_BASKET` conversions via sessionized attribution joins, and fans out to three downstream sinks: Kafka enriched topic (→ Apache Pinot), Redis hot-counter cache, and Iceberg/S3 cold archive. Redis key/field patterns are sourced from `RedisKeySchema` in `shared-model` to maintain structural compatibility with `insights-query-service`.
 
 ---
 
@@ -152,11 +152,18 @@ On timer fire (attribution window expired):
 
 #### Redis Hot-Counter Schema
 
+Key and field patterns are built by `RedisKeySchema` from `shared-model` — the single source of truth shared with `insights-query-service`:
+
 ```
-Key:   campaign:{tenantId}:{campaignId}
-Field: {eventType}  (e.g. CLICK, IMPRESSION, CLICK_TO_BASKET)
-Value: counter (incremented atomically via HINCRBY)
-TTL:   platform.flink.redis-ttl-seconds (default 172800 = 48 h, refreshed on every write)
+Aggregate hash key  :  campaign:{tenantId}:{campaignId}   (RedisKeySchema.hashKey)
+Hash field          :  {eventType}   (CLICK, IMPRESSION, CLICK_TO_BASKET)
+Value               :  counter (HINCRBY — total aggregate)
+
+Time-series hash key  :  ts:{tenantId}:{campaignId}:{eventType}   (RedisKeySchema.timeSeriesKey)
+Hash field            :  {hourBucket_epoch_ms}   (RedisKeySchema.hourBucket — hour-aligned)
+Value                 :  counter per bucket (HINCRBY)
+
+TTL:  platform.flink.redis-ttl-seconds (default 172800 = 48 h, refreshed on every write)
 ```
 
 ---
@@ -172,11 +179,11 @@ com.java.processing/
 
 ├── config/
 │   ├── FlinkJobLauncher.java       # Daemon thread that calls FlinkStreamingJob.execute()
-│   ├── FlinkProperties.java        # Binds platform.flink.* configuration
-│   └── KafkaConfig.java            # Spring-Kafka consumer factory (fallback mode)
-
+│   ├── FlinkProperties.java        # Binds platform.flink.* config; adds prometheusEnabled/Port (OB-3)
+│   └── KafkaConfig.java            # Spring-Kafka consumer + producer factory; manual ack, DLQ, observation-enabled (OB-1)
+│
 ├── consumer/
-│   └── EventConsumer.java          # Spring-Kafka listener (fallback when platform.flink.enabled=false)
+│   └── EventConsumer.java          # ConsumerRecord listener; extracts X-Request-Id header → MDC (OB-2)
 
 ├── job/
 │   └── FlinkStreamingJob.java      # Full Flink DataStream topology definition and execution
@@ -218,6 +225,8 @@ All properties are in `src/main/resources/application[-profile].yml`.
 | `platform.flink.use-rocks-db` | `false` | Use EmbeddedRocksDB incremental state backend (required for large state in prod) |
 | `platform.flink.kafka-bootstrap-servers` | _(spring.kafka)_ | Override Kafka brokers for the Flink source/sink |
 | `platform.flink.schema-registry-url` | `http://localhost:8081` | Confluent Schema Registry URL for Avro SerDes |
+| `platform.flink.prometheus-enabled` | `true` | Enable Flink Prometheus reporter (OB-3) |
+| `platform.flink.prometheus-port` | `9249` | Port for the Flink Prometheus reporter HTTP server |
 
 ### Redis Sink (Flink)
 
@@ -236,14 +245,44 @@ All properties are in `src/main/resources/application[-profile].yml`.
 | `platform.dedup.ttl-minutes` | `60` | EventId seen-state TTL for deduplication |
 | `platform.attribution.window-hours` | `24` | Attribution window (CLICK → ADD_TO_CART max latency) |
 
-### Kafka
+### Kafka (Spring-Kafka Fallback Mode)
 
-| Property | Description |
-|:---------|:------------|
-| `platform.kafka.env` | Environment prefix for topic names (`local`, `dev`, `staging`, `prod`) |
-| `platform.kafka.topic.raw` | Raw events input topic |
-| `platform.kafka.topic.enriched` | Enriched events output topic |
-| `platform.kafka.consumer-group.stream-engine` | Consumer group ID |
+#### Consumer
+
+| Property | Default | Description |
+|:---------|:--------|:------------|
+| `platform.kafka.env` | `local` | Environment prefix for topic names |
+| `platform.kafka.topic.raw` | _(derived)_ | Raw events input topic |
+| `platform.kafka.topic.enriched` | _(derived)_ | Enriched events output topic |
+| `platform.kafka.topic.dlq` | _(derived)_ | Dead-letter topic for events that fail after all consumer retries |
+| `platform.kafka.consumer-group.stream-engine` | _(derived)_ | Consumer group ID |
+| `spring.kafka.consumer.enable-auto-commit` | `false` | Manual offset commit — offset advanced only after `onMessage()` succeeds |
+| `spring.kafka.listener.ack-mode` | `MANUAL_IMMEDIATE` | Commit mode; enforced in `KafkaConfig` regardless of YAML |
+| `spring.kafka.listener.concurrency` | `3` (local) / `64` (prod) | Number of consumer threads. Each thread owns whole partitions — per-partition order preserved. Set via `KAFKA_LISTENER_CONCURRENCY` env var |
+| `spring.kafka.consumer.max-poll-records` | `500` | Records fetched per poll cycle |
+| `spring.kafka.consumer.properties.fetch.min.bytes` | `1048576` | Broker waits until 1 MB is available (reduces round-trips) |
+| `spring.kafka.consumer.properties.fetch.max.wait.ms` | `500` | Max broker wait even if `fetch.min.bytes` not met |
+| `spring.kafka.consumer.properties.max.poll.interval.ms` | `300000` | Must exceed processing time for `max-poll-records` records |
+| `spring.kafka.consumer.properties.session.timeout.ms` | `45000` | Broker detection timeout for dead consumers |
+| `spring.kafka.consumer.properties.heartbeat.interval.ms` | `15000` | Heartbeat frequency (< session.timeout.ms / 3) |
+
+**Consumer error handling:** `DefaultErrorHandler` with `FixedBackOff(1 s, 3 retries)`. After all retries fail the event is routed to the DLQ topic via `DeadLetterPublishingRecoverer` for SRE replay. Offset is committed after the DLQ send so the partition advances.
+
+**Ordering guarantee:** `concurrency` is safe because the partition key on the raw topic is `tenantId:sessionId` — all events for a given session land on the same partition and are processed sequentially by the thread owning that partition. The `StatefulJoiner` (CLICK → ADD_TO_CART attribution) relies on this ordering guarantee.
+
+#### Producer
+
+| Property | Default | Description |
+|:---------|:--------|:------------|
+| `spring.kafka.producer.acks` | `all` | All in-sync replicas must ack |
+| `spring.kafka.producer.retries` | `2147483647` | Effectively infinite; bounded by `delivery.timeout.ms` |
+| `spring.kafka.producer.properties.enable.idempotence` | `true` | Prevents broker-side duplicate writes on retry |
+| `spring.kafka.producer.properties.max.in.flight.requests.per.connection` | `5` | Max safe value with idempotence |
+| `spring.kafka.producer.properties.delivery.timeout.ms` | `120000` | Total retry window (2 min) |
+| `spring.kafka.producer.properties.linger.ms` | `10` | Batch accumulation window |
+| `spring.kafka.producer.properties.batch.size` | `65536` | Per-partition batch size (64 KB) |
+| `spring.kafka.producer.properties.buffer.memory` | `67108864` | Total producer buffer (64 MB) |
+| `spring.kafka.producer.properties.compression.type` | `lz4` | LZ4 compression (~50–60% size reduction) |
 
 ---
 
@@ -305,7 +344,7 @@ platform:
 
 `platform.flink.enabled=false`
 
-The `EventConsumer` Spring-Kafka listener processes events using a simple in-process pipeline: `Deduplicator` → `StatefulJoiner` → `KafkaAggregateSink`. This mode requires no Flink runtime and starts in seconds with just a Kafka broker.
+The `EventConsumer` Spring-Kafka listener processes events using a simple in-process pipeline: `Deduplicator` → `StatefulJoiner` → `KafkaAggregateSink`. Offset is committed manually (`MANUAL_IMMEDIATE` ack mode) only after all sinks succeed. On failure the `DefaultErrorHandler` retries 3 times then routes the event to the DLQ. This mode requires no Flink runtime and starts in seconds with just a Kafka broker.
 
 ```yaml
 platform:
@@ -314,6 +353,9 @@ platform:
 spring:
   kafka:
     bootstrap-servers: localhost:9092
+    listener:
+      ack-mode: MANUAL_IMMEDIATE
+      concurrency: ${KAFKA_LISTENER_CONCURRENCY:3}
 ```
 
 ---
@@ -373,6 +415,9 @@ docker build -t stream-processing-engine:latest stream-processing-engine/
 | Decision | Rationale |
 |:---------|:----------|
 | **Dual-mode operation (Flink + Spring-Kafka fallback)** | Allows local development and integration testing without running a full Flink cluster while sharing the same codebase for production |
+| **Manual ack (MANUAL_IMMEDIATE)** | Kafka offset is committed only after all sinks (`pinotSink`, `icebergSink`, `statefulJoiner`) complete successfully. If any step throws, `DefaultErrorHandler` retries 3 times then routes to DLQ — no event is silently skipped |
+| **DLQ after exhausted retries** | `DeadLetterPublishingRecoverer` parks permanently failing events on the DLQ topic (`*.stream-processing-failed-by-tenant-id`) so SRE can inspect and replay without data loss |
+| **Concurrency with partition-key ordering** | `concurrency` is safe for the attribution join because the producer partitions by `tenantId:sessionId` — all events for a session land on one partition, processed by one thread in offset order. Different sessions on different partitions are safely parallelised |
 | **RocksDB incremental state backend** | Deduplication state for billions of unique `eventId` values per day cannot fit in JVM heap; incremental checkpoints minimize checkpoint overhead at scale |
 | **Processing-time attribution timer** | Processing-time timers are simpler and more reliable than event-time timers for the attribution window — the window is a business policy (~24h) not a strict event-ordering constraint |
 | **CLICK_TO_BASKET as a synthesized event** | Rather than enriching ADD_TO_CART events with click metadata, a synthetic event is emitted — this keeps the event schema simple and allows Pinot/Redis to count conversions as first-class metrics using the same counter pattern as clicks and impressions |
@@ -380,4 +425,9 @@ docker build -t stream-processing-engine:latest stream-processing-engine/
 | **`JedisPool` is transient in RedisHotCounterSink** | Flink serializes operators for distribution across TaskManagers; a `JedisPool` connection pool must not be serialized and must be created in `open()` per TaskManager |
 | **At-least-once Kafka delivery for enriched topic** | The `DeduplicationFunction` downstream provides idempotency guarantees, so the slight overhead of exactly-once Kafka transactions on the sink is traded for simpler sink configuration (`AT_LEAST_ONCE` in `buildKafkaSink`) |
 | **Watermark tolerance of 5 minutes** | Mobile app events frequently arrive late due to network queuing; 5-minute tolerance allows Flink's event-time windows to include most late events without unbounded waiting |
+| **`RedisKeySchema` from `shared-model`** | Key and field patterns for Redis writes are sourced from `RedisKeySchema` (shared library) rather than hardcoded in the sink — structural compatibility with `insights-query-service` reads is a compile-visible contract |
+| **MDC + X-Request-Id header propagation (OB-2)** | `EventConsumer` switches from `ShoppingEvent` to `ConsumerRecord<String, ShoppingEvent>` to access Kafka record headers. The `X-Request-Id` header is extracted and placed in SLF4J MDC so every log line in the processing pipeline carries the original HTTP correlation ID from the ingest request |
+| **KafkaConfig observation-enabled (OB-1)** | `factory.getContainerProperties().setObservationEnabled(true)` enables Micrometer OTEL instrumentation on the consumer container. With `micrometer-tracing-bridge-otel` on the classpath, the W3C `traceparent` header is automatically extracted from each record and the trace is continued |
+| **Flink Prometheus reporter (OB-3)** | `FlinkStreamingJob.buildEnvironment()` configures `PrometheusReporterFactory` on the `StreamExecutionEnvironment` when `platform.flink.prometheus-enabled=true`. Exposes Flink native metrics (checkpoint duration, backpressure ratio, watermark lag) on port 9249 for Prometheus scraping |
+| **Structured JSON logging (OB-5)** | `logback-spring.xml` activates `LogstashEncoder` in the `prod` profile. JSON lines are consumed by Fluent Bit (DaemonSet) → Grafana Loki for correlated log queries |
 

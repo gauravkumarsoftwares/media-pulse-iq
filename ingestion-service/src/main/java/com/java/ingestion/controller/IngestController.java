@@ -23,10 +23,10 @@ import org.springframework.web.bind.annotation.*;
  * service is ever called; validation failures return {@code 422} via
  * {@link com.java.ingestion.common.GlobalExceptionHandler}.
  */
-@Slf4j
 @RestController
 @RequestMapping("/api/v1/events")
 @RequiredArgsConstructor
+@Slf4j
 @Tag(name = "Events", description = "Ad-interaction event ingestion")
 public final class IngestController {
 
@@ -52,11 +52,17 @@ public final class IngestController {
             @Valid @RequestBody IngestEventRequest request,
             @RequestHeader(value = "X-Tenant-Context", required = false) String tenantContext) {
 
+        log.info("[API] POST /api/v1/events tenant={} eventId={} eventType={}",
+                tenantContext, request.eventId(), request.eventType());
+
         if (tenantContext == null || tenantContext.isBlank()) {
+            log.warn("[API] POST /api/v1/events rejected — missing X-Tenant-Context header");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
 
         IngestEventResponse response = ingestionService.ingest(request, tenantContext);
+        log.info("[API] POST /api/v1/events accepted tenant={} eventId={} remainingQuota={}",
+                tenantContext, response.eventId(), response.remainingQuota());
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
     }
 }
