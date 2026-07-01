@@ -1,5 +1,6 @@
 package com.java.ingestion.producer;
 
+import com.java.ingestion.observability.IngestionMetrics;
 import com.java.model.ShoppingEvent;
 import com.java.security.pii.PiiMasker;
 import lombok.RequiredArgsConstructor;
@@ -29,7 +30,11 @@ public final class DlqProducer {
 
     private final KafkaTemplate<String, ShoppingEvent> kafkaTemplate;
 
-    /** Resolved at startup from the DDD-named topic property. */
+    private final IngestionMetrics metrics;
+
+    /**
+     * Resolved at startup from the DDD-named topic property.
+     */
     @Value("${platform.kafka.topic.dlq}")
     private String topicDlq;
 
@@ -44,11 +49,19 @@ public final class DlqProducer {
         String key = redacted.getTenantId() != null ? redacted.getTenantId() : "unknown";
         ProducerRecord<String, ShoppingEvent> record = new ProducerRecord<>(topicDlq, key, redacted);
         record.headers().add(new RecordHeader("dlq-reason", reason.getBytes(StandardCharsets.UTF_8)));
-        kafkaTemplate.send(record);
+        kafkaTemplate.send(record).whenComplete((metadata, ex) -> {
+            if (ex != null) {
+                log.error("[PRODUCER] Permanent send failure — routing event {} to DLQ: {}",
+                        redacted.getEventId(), PiiMasker.mask(reason), ex);
+                metrics.recordDlq(rawEvent.getTenantId(), reason);
+            }
+        });
         log.warn("Routed event {} to DLQ: {}", redacted.getEventId(), PiiMasker.mask(reason));
     }
 
-    /** Return a PII-minimized copy safe for the DLQ. */
+    /**
+     * Return a PII-minimized copy safe for the DLQ.
+     */
     private ShoppingEvent redact(ShoppingEvent in) {
         ShoppingEvent out = new ShoppingEvent();
         out.setEventId(in.getEventId());
