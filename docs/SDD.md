@@ -3,7 +3,7 @@
 
 > **Version:** 1.0 · **Date:** 2026-06-26 · **Status:** Current implementation
 > **Audience:** Platform engineers, architects, SREs, tech leads
-> **Related docs:** `architecture.md` · `docs/AUTHENTICATION.md` · `implementation-details.md`
+> **Related docs:** `docs/AUTHENTICATION.md`
 
 ---
 
